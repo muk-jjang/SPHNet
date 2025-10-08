@@ -1,6 +1,6 @@
 # Introduction
 Welcome! This repository is the official implement of SPHNet in the ICML'25 paper: [Efficient and Scalable Density Functional Theory Hamiltonian Prediction through Adaptive Sparsity](https://arxiv.org/abs/2502.01171). 
-This repository also contains implmentation of [Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonian for Scalable Molecular Systems][https://openreview.net/forum?id=twEvvkQqPS]
+This repository also contains implmentation of [Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonian for Scalable Molecular Systems](https://openreview.net/forum?id=twEvvkQqPS).
 
 ![](SPHNet.png)
 
