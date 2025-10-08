@@ -1,5 +1,6 @@
 # Introduction
 Welcome! This repository is the official implement of SPHNet in the ICML'25 paper: [Efficient and Scalable Density Functional Theory Hamiltonian Prediction through Adaptive Sparsity](https://arxiv.org/abs/2502.01171). 
+This repository also contains implmentation of [Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonian for Scalable Molecular Systems][https://openreview.net/forum?id=twEvvkQqPS]
 
 ![](SPHNet.png)
 
@@ -50,5 +51,14 @@ There are three config files that set the model and training process. The config
   author={Luo, Erpai and Wei, Xinran and Huang, Lin and Li, Yunyang and Yang, Han and Xia, Zaishuo and Wang, Zun and Liu, Chang and Shao, Bin and Zhang, Jia},
   journal={arXiv preprint arXiv:2502.01171},
   year={2025}
+}
+
+@inproceedings{
+li2025enhancing,
+title={Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonians for Molecular Systems},
+author={Yunyang Li and Zaishuo Xia and Lin Huang and Xinran Wei and Samuel Harshe and Han Yang and Erpai Luo and Zun Wang and Jia Zhang and Chang Liu and Bin Shao and Mark Gerstein},
+booktitle={The Thirteenth International Conference on Learning Representations},
+year={2025},
+url={https://openreview.net/forum?id=twEvvkQqPS}
 }
 ```
