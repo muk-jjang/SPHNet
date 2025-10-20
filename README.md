@@ -1,6 +1,6 @@
 # Introduction
-Welcome! This repository is the official implement of SPHNet in the ICML'25 paper: [Efficient and Scalable Density Functional Theory Hamiltonian Prediction through Adaptive Sparsity](https://arxiv.org/abs/2502.01171). 
-This repository also contains the official implmentation of [Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonian for Scalable Molecular Systems](https://openreview.net/forum?id=twEvvkQqPS).
+Welcome! This repository is the official implementation of SPHNet in the ICML'25 paper: [Efficient and Scalable Density Functional Theory Hamiltonian Prediction through Adaptive Sparsity](https://arxiv.org/abs/2502.01171). 
+This repository also contains the official implementation of [Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonian for Scalable Molecular Systems](https://openreview.net/forum?id=twEvvkQqPS).
 
 ![](SPHNet.png)
 
@@ -17,7 +17,7 @@ conda activate sphnet
 ```
 
 # Data preparation
-Before training, you need to preprocess the data to our custom format to maximize model performance. 
+Before training, you need to preprocess the data into our custom format to maximize model performance. 
 
 You can generate well-formed data with below command for md17 and qh9 dataset or modify this file to preprocess your own dataset. We support original data file in both lmdb and mdb format. 
     
