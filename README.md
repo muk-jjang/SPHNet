@@ -1,6 +1,6 @@
 # Introduction
 Welcome! This repository is the official implement of SPHNet in the ICML'25 paper: [Efficient and Scalable Density Functional Theory Hamiltonian Prediction through Adaptive Sparsity](https://arxiv.org/abs/2502.01171). 
-This repository also contains implmentation of [Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonian for Scalable Molecular Systems](https://openreview.net/forum?id=twEvvkQqPS).
+This repository also contains the official implmentation of [Enhancing the Scalability and Applicability of Kohn-Sham Hamiltonian for Scalable Molecular Systems](https://openreview.net/forum?id=twEvvkQqPS).
 
 ![](SPHNet.png)
 
@@ -27,6 +27,8 @@ python src/dataset/preprocess_data.py --data_name qh9_dynamic_mol --input_path /
 
 For data_name we support qh9_stable/dynamic_split (such as qh9_dynamic_mol). For input_path, set the folder path where you put the QH9Dynamic/QH9Stable folder. We also provide an example data in the ./example_data folder, which is a small subset of qh9_stable_iid. You can skip the preprocess and set the dataset-path to ./example_data/data.lmdb to fast train and test model.
 
+For the PubChemQH dataset used in the paper, you can find the preprocessed PubchemQH at [here](https://huggingface.co/datasets/EperLuo/PubChemQH). Please modify the data realted config in the config.yaml file to use this dataset.
+
 # Model training
 ## Halmintonian model train on local machine
 There are three config files that set the model and training process. The config file in config/model is the model configuration. The config file in config/schedule set the learning schedule. The config/config.yaml is the overall configuration file. Please see the comments in config/config.yaml for more details.
@@ -46,11 +48,18 @@ There are three config files that set the model and training process. The config
 # Citation
 
 ```
-@article{sphnet,
-  title={Efficient and Scalable Density Functional Theory Hamiltonian Prediction through Adaptive Sparsity},
-  author={Luo, Erpai and Wei, Xinran and Huang, Lin and Li, Yunyang and Yang, Han and Xia, Zaishuo and Wang, Zun and Liu, Chang and Shao, Bin and Zhang, Jia},
-  journal={arXiv preprint arXiv:2502.01171},
-  year={2025}
+@InProceedings{pmlr-v267-luo25l,
+  title = 	 {Efficient and Scalable Density Functional Theory {H}amiltonian Prediction through Adaptive Sparsity},
+  author =       {Luo, Erpai and Wei, Xinran and Huang, Lin and Li, Yunyang and Yang, Han and Xia, Zaishuo and Wang, Zun and Liu, Chang and Shao, Bin and Zhang, Jia},
+  booktitle = 	 {Proceedings of the 42nd International Conference on Machine Learning},
+  pages = 	 {41368--41390},
+  year = 	 {2025},
+  volume = 	 {267},
+  series = 	 {Proceedings of Machine Learning Research},
+  month = 	 {13--19 Jul},
+  publisher =    {PMLR},
+  pdf = 	 {https://raw.githubusercontent.com/mlresearch/v267/main/assets/luo25l/luo25l.pdf},
+  url = 	 {https://proceedings.mlr.press/v267/luo25l.html}
 }
 
 @inproceedings{
@@ -61,4 +70,6 @@ booktitle={The Thirteenth International Conference on Learning Representations},
 year={2025},
 url={https://openreview.net/forum?id=twEvvkQqPS}
 }
+
+Note: If you need to use the PubChem QH dataset, please cite these two articles.
 ```
