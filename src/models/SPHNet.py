@@ -297,7 +297,7 @@ class NonDiagLayer(torch.nn.Module):
             self.reset_tp(instruction_saved)
             self.use_fix_tp = True
         else:
-            self.use_fix_tp = use_sparse_tp
+            self.use_fix_tp = False
 
     @property
     def device(self):
@@ -457,7 +457,7 @@ class DiagLayer(torch.nn.Module):
             self.reset_tp(instruction_saved,instruction_weight)
             self.use_fix_tp = True
         else:
-            self.use_fix_tp = use_sparse_tp
+            self.use_fix_tp = False
     
     def reset_tp(self, instructions, weight):
         instruction_nodes = []
@@ -944,7 +944,7 @@ class Pair_construction_layer(nn.Module):
                     invariant_layers=1,
                     invariant_neurons=self.hs,
                     use_sparse_tp=use_sparse_tp,
-                    use_pair_sparse=True,
+                    use_pair_sparse=use_sparse_tp,
                     sparsity = sparsity,
                     resnet=True, 
                     id=l+1,   
@@ -1160,3 +1160,4 @@ class SPHNet(nn.Module):
         
         # return the atom features
         return batch_data
+
