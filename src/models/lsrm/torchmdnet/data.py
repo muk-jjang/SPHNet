@@ -111,6 +111,7 @@ class DataModule(LightningDataModule):
             shuffle=shuffle,
             num_workers=self.hparams["num_workers"],
             pin_memory=True,
+            # pin_memory=False,
         )
 
         if store_dataloader:
