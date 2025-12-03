@@ -191,6 +191,7 @@ class DataModule(LightningDataModule):
             # max_num_batches=num_batches,
             drop_last=True,
             pin_memory=True,
+            persistent_workers=False,  # 워커를 매 epoch마다 재시작하여 LMDB 환경 문제 방지
         )
 
         return dl
