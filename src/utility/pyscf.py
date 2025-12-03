@@ -120,14 +120,14 @@ def get_pyscf_obj_from_dataset(pos,atomic_numbers,  basis: str="def2-svp",unit=N
     mol.basis = basis
     mol.verbose = verbose
     mol.build(unit=unit)
-    # mf = dft.KS(mol, xc=xc)
-    mf = scf.RKS(mol)
+    mf = dft.RKS(mol, xc=xc)
+    # mf = scf.RKS(mol)
     mf.grids.level=3
     mf.max_cycle=20
     mf.direct_scf_tol=1e-10 # previous is 1e-12
     mf.conv_tol_grad=3.16e-5
     mf.conv_tol=1e-8   # 1e-13
-    mf.xc = "b3lyp5"
+    mf.xc = xc
     factory = None
     if gpu:
         try:
@@ -246,8 +246,8 @@ def get_homo_lumo_from_h(mf: scf.RHF, h: np.ndarray, s1e: np.ndarray=None):
     e_sort = mo_energy[e_idx]
     nocc = mf.mol.nelectron // 2
     homo, lumo = e_sort[nocc-1], e_sort[nocc]
-    return homo-lumo, mo_coeff[:, :nocc], mo_energy[:nocc]
-
+    mo_occ = mf.get_occ(mo_energy[:nocc], mo_coeff[:, :nocc])
+    return homo-lumo, mo_coeff[:, :nocc], mo_energy[:nocc], mo_occ
 
 
 # TODO: 
