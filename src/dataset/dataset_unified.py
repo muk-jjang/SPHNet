@@ -30,6 +30,8 @@ import numpy as np
 import os.path as osp
 from argparse import Namespace
 import pickle
+import threading
+import atexit
 
 from tqdm import tqdm
 import torch.nn.functional as F
@@ -98,6 +100,9 @@ def get_full_energy(data_name, energy, atomic_numbers):
 
 class MdbDataset(Dataset):
     url = 'https://drive.google.com/file/d/1LcEJGhB8VUGkuyb0oQ_9ANJdSkky9xMS/view?usp=sharing'
+    # Thread-local storage for LMDB environments (각 워커마다 독립적으로 LMDB 열기)
+    _local = threading.local()
+    
     def __init__(self, path, transform=None, pre_transform=None, pre_filter=None,
                 remove_init = False,
                  remove_atomref_energy = False,
@@ -120,37 +125,57 @@ class MdbDataset(Dataset):
         # self.slices = {
         #     'id': torch.arange(self.train_mask.shape[0] + self.val_mask.shape[0] + self.test_mask.shape[0] + 1)}
         self.conv, _, self.mask,_ = get_conv_variable_lin(self.basis)
-        self._keys, self.envs = [], []
-        self.open_db()
+        # __init__에서는 LMDB를 열지 않음 (lazy initialization)
+        # 길이 정보만 미리 읽기 (한 번만 열어서 길이만 읽고 닫기)
+        self._num_samples = None
+        self._init_length()
         
-    def open_db(self):
-        print(self.path)
-        self.envs.append(self.connect_db(self.path))
-        length = self.envs[-1].begin().get("length".encode("ascii"))
-        if length is not None:
-            length = pickle.loads(length)
-        else:
-            length = self.envs[-1].stat()["entries"]
-            
-        self._keys.append(list(range(length)))
-
-        keylens = [len(k) for k in self._keys]
-        self._keylen_cumulative = np.cumsum(keylens).tolist()
-        self.num_samples = sum(keylens)
+    def _init_length(self):
+        """길이 정보만 읽기 (메인 프로세스에서만 실행)"""
+        temp_env = self.connect_db(self.path)
+        try:
+            length = temp_env.begin().get("length".encode("ascii"))
+            if length is not None:
+                self._num_samples = pickle.loads(length)
+            else:
+                self._num_samples = temp_env.stat()["entries"]
+        finally:
+            temp_env.close()
+    
+    def _get_db_env(self):
+        """Thread-local storage를 사용하여 워커마다 독립적으로 LMDB 열기"""
+        if not hasattr(self._local, 'env') or self._local.env is None:
+            self._local.env = self.connect_db(self.path)
+            # 워커 프로세스 종료 시 LMDB 환경을 닫도록 등록
+            atexit.register(self._close_db_env)
+        return self._local.env
+    
+    def _close_db_env(self):
+        """Thread-local storage의 LMDB 환경 닫기"""
+        if hasattr(self._local, 'env') and self._local.env is not None:
+            try:
+                self._local.env.close()
+            except:
+                pass
+            finally:
+                self._local.env = None
         
     def __len__(self):
-        return self.num_samples
+        return self._num_samples
 
     def __getitem__(self, idx):
-        db_env = self.envs[0]
+        # Thread-local storage에서 LMDB 환경 가져오기 (워커마다 독립적)
+        db_env = self._get_db_env()
         with db_env.begin() as txn:
             data_dict = txn.get(int(idx).to_bytes(length=4, byteorder='big'))
             data_dict = pickle.loads(data_dict)
-            _, num_nodes, atoms, pos, Ham = \
+            _, num_nodes, atoms, pos, Ham, forces, energy = \
                 data_dict['id'], data_dict['num_nodes'], \
                 np.frombuffer(data_dict['atoms'], np.int32), \
                 np.frombuffer(data_dict['pos'], np.float64), \
-                np.frombuffer(data_dict['Ham'], np.float64)
+                np.frombuffer(data_dict['Ham'], np.float64), \
+                np.frombuffer(data_dict['forces'], np.float64), \
+                np.frombuffer(data_dict['energy'], np.float64)
             pos = pos.reshape(num_nodes, 3)
             num_orbitals = sum([5 if atom <= 2 else 14 for atom in atoms])
             Ham_init = np.frombuffer(data_dict['Ham_init'], np.float64)
@@ -182,6 +207,8 @@ class MdbDataset(Dataset):
                 "max_block_size":self.conv.max_block_size,
                 "labels":data.labels.numpy(),
                 "edge_index":data.edge_index.numpy(),
+                "forces": forces.astype(np.float32).reshape(-1,3),
+                "energy": energy.astype(np.float32),
                 }
     def connect_db(self, lmdb_path=None):
         env = lmdb.open(
@@ -397,5 +424,4 @@ class LmdbDataset(Dataset):
         else:
             self.env.close()
             self.env = None
-
 
