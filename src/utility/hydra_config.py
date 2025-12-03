@@ -85,6 +85,7 @@ class Config(BaseSchema):
     ############: Any
     #: Any data realted config
     basis: str = "def2-svp"  #when predict hamitonian, the basis need to be set
+    xc: str = "pbe0"
     data_name: str = "QH9"
     dataset_path: Any  = None
     index_path: Any  = None
