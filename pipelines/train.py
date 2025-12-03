@@ -22,7 +22,7 @@ import random
 import hydra
 from omegaconf import DictConfig, OmegaConf
 
-os.environ["CUDA_VISIBLE_DEVICES"]="1"
+# os.environ["CUDA_VISIBLE_DEVICES"]="0"
 # Add src in root folder
 cur_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(os.path.join(cur_dir, ".."))
@@ -76,7 +76,8 @@ def main(config):
     model = LNNP(config)
 
     callbacks = []
-    callbacks.append(EarlyStopping("val_loss", patience=config.early_stopping_patience))
+    #callbacks.append(EarlyStopping("val_loss", patience=config.early_stopping_patience))
+    callbacks.append(EarlyStopping("val_loss", patience=config.early_stopping_patience, check_on_train_epoch_end=False))
     callbacks.append(ModelCheckpoint(
         dirpath=config.log_dir,
         monitor="val_loss",
