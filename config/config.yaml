@@ -3,7 +3,7 @@ defaults: # which model/schedule config file to use
 - schedule: polynomial 
 - _self_
 
-job_id: test # The checkpoint/log file is saved in ckpt_path/job_id
+job_id: train # The checkpoint/log file is saved in ckpt_path/job_id
 ckpt_path: outputs
 seed: 123
 log_dir: "outputs"
@@ -11,8 +11,8 @@ debug: false
 
 wandb: # wandb configuration
   open: False
-  wandb_api_key: your_wandb_api_key
-  wandb_project: your_wandb_project
+  wandb_api_key: 
+  wandb_project: SPHNet
   wandb_group: ""
   wandb_notes: ""
 
@@ -62,13 +62,13 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 # dataset_path : "/data/qh9stable/data.mdb"     # if the dataset is mdb format, enter the file path
 # # dataset_path : "/data/qh9dynamic/data.mdb"
 
-# data_name: md17
-# basis: "def2-svp"
-# dataset_path : "/data/md17/ethanol/data.mdb"
-
-data_name: custom
+data_name: md17
 basis: "def2-svp"
-dataset_path : "example_data/data.mdb"
+dataset_path : 
+
+# data_name: custom
+# basis: "def2-svp"
+# dataset_path : "example_data/data.mdb"
 index_path : "."
 
 dataset_size : 1000 #the dataset size is used. This will decide the steps of different phases"
