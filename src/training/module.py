@@ -14,6 +14,10 @@ from functools import partial
 import torch_geometric.transforms as T
 import random
 HATREE_TO_KCAL = 627.5096
+BOHR2ANG = 0.5291772105638411 
+HA2eV    = 27.211396641308        # Hartree to eV conversion
+HA2meV   = HA2eV * 1000  
+HA_BOHR_2_meV_ANG    = HA2meV / BOHR2ANG    
 
 class FloatCastDatasetWrapper(T.BaseTransform):
     """A transform that casts all floating point tensors to a given dtype.
@@ -187,7 +191,7 @@ def build_final_matrix(batch_data, basis, sym=True):
 
 class EnergyHamiError(ErrorMetric):
     def __init__(self, loss_weight, trainer = None,metric="mae", 
-                    basis="def2-svp", transform_h=False, scaled=False, normalization=False):
+                    basis="def2-svp", xc='pbe0', transform_h=False, scaled=False, normalization=False):
         super().__init__(loss_weight)
         
         self.trainer = trainer
@@ -195,6 +199,7 @@ class EnergyHamiError(ErrorMetric):
         self.loss_weight = loss_weight
         self.name = "energy_hami_loss"
         self.basis = basis
+        self.xc = xc
         self.transform_h = transform_h
         self.scaled = scaled
         self.normalization = normalization
@@ -207,6 +212,7 @@ class EnergyHamiError(ErrorMetric):
     def _batch_energy_hami(self, batch_data):
         batch_size = batch_data['idx'].shape[0]
         energy = batch_data['energy'] if 'energy' in batch_data.keys() else batch_data['idx']
+        forces = batch_data['forces']
         if self.normalization:
             batch_data['pred_hamiltonian_diagonal_blocks'] = \
                 batch_data['pred_hamiltonian_diagonal_blocks'] * \
@@ -234,15 +240,23 @@ class EnergyHamiError(ErrorMetric):
         hami_humo_lumo = torch.zeros_like(energy,dtype=torch.float64)
         target_humo_lumo = torch.zeros_like(energy,dtype=torch.float64)
         hami_coeff = torch.zeros_like(energy,dtype=torch.float64)
-
+        # hami_forces = torch.zeros(
+        #     batch_size, dtype=torch.float64, device=energy.device
+        # )
         target_hami = batch_data["hamiltonian"]
 
         for i in range(batch_size):
             start , end = batch_data['ptr'][i],batch_data['ptr'][i+1]
             pos = batch_data['pos'][start:end].detach().cpu().numpy()
+            mol_forces = batch_data["forces"][start:end].to(
+                device=energy.device, dtype=torch.float64
+            )
             atomic_numbers = batch_data['atomic_numbers'][start:end].detach().cpu().numpy()
             mol, mf,factory = get_pyscf_obj_from_dataset(pos,atomic_numbers, basis=self.basis, 
-                                                         xc='b3lyp5', gpu=False, verbose=1)
+                                                         xc=self.xc, gpu=False, verbose=1)
+            #gradient calculation
+            grad_frame = mf.nuc_grad_method()
+
             dm0 = mf.init_guess_by_minao()
             init_h = mf.get_fock(dm=dm0)
 
@@ -256,22 +270,42 @@ class EnergyHamiError(ErrorMetric):
             hami_energy[i] = get_energy_from_h(mf, f_hi)
             target_energy[i] = get_energy_from_h(mf, f_gti)
 
-            hami_humo_lumo[i], hami_mo_coeff, mo_energy_pred = get_homo_lumo_from_h(mf, f_hi)
-            target_humo_lumo[i], target_mo_coeff, mo_energy_target = get_homo_lumo_from_h(mf, f_gti)
+            hami_humo_lumo[i], hami_mo_coeff, mo_energy_pred, mo_occ = get_homo_lumo_from_h(mf, f_hi)
+            target_humo_lumo[i], target_mo_coeff, mo_energy_target, mo_occ_target = get_homo_lumo_from_h(mf, f_gti)
             target_energy[i] = torch.mean(torch.abs(torch.tensor(mo_energy_pred - mo_energy_target)))
 
             hami_coeff[i] = torch.cosine_similarity(torch.tensor(hami_mo_coeff), torch.tensor(target_mo_coeff), dim=0).abs().mean()
-
+            # molecule energy difference
+            hami_energy[i] = float(abs(hami_energy[i] - energy[i]))
+            # calculated forces difference -> MAE (pred - gt)
+            # cal_forces = -torch.from_numpy(
+            #     grad_frame.kernel(
+            #         mo_energy=mo_energy_pred, mo_coeff=hami_mo_coeff, mo_occ=mo_occ
+            #     )
+            # ).to(device=mol_forces.device, dtype=torch.float64)
+            # hami_forces[i] = torch.mean(torch.abs(cal_forces - mol_forces))
+            # hami_forces[i] = hami_forces[i] * HA_BOHR_2_meV_ANG
+            # print(f"cal_forces: {cal_forces.shape}")
+            # print(f"cal_forces: {cal_forces}")
+            # print(f"cal_forces_mean: {cal_forces.mean()}")
+            # print(f"forces: {mol_forces.shape}")
+            # print(f"forces_mean: {mol_forces.mean()}")
+            # print(f"forces: {mol_forces}")
+            # print(f"hami_force_mae: {hami_forces[i]}")
+            # print(f'hami_energy: {hami_energy[i] * HA2eV} eV')
             if factory is not None:factory.free_resources()
-
+            
+        # return hami_energy, target_energy, hami_humo_lumo-target_humo_lumo, hami_coeff, hami_forces
         return hami_energy, target_energy, hami_humo_lumo-target_humo_lumo, hami_coeff
     
     def cal_loss(self, batch_data, error_dict = {}, metric = None):
         metric = self.metric if metric is None else metric
-        
-        predict, target, humo_lumo_gap_diff, mo_coeff = self._batch_energy_hami(batch_data)
+        predict, target, humo_lumo_gap_diff, mo_coeff = self._batch_energy_hami(batch_data) 
+        # predict, target, humo_lumo_gap_diff, mo_coeff, forces = self._batch_energy_hami(batch_data) 
         error_dict['mo_coefficient'] = mo_coeff.mean()
         error_dict['energy_mae'] = torch.mean(target)
+        # error_dict['mol_energy'] = torch.mean(predict)
+        # error_dict['forces_mae'] = torch.mean(forces)
 
 
 class _OrbitalEnergyErrorBase(ErrorMetric):
@@ -576,6 +610,7 @@ class LNNP(LightningModule):
                                                                      self,
                                                                 self.hparams.energy_val_loss, 
                                                                 self.hparams.basis, 
+                                                                self.hparams.xc,
                                                                 "qh9" in self.hparams.data_name.lower(),
                                                                 self.hparams.hami_train_loss=="scaled",
                                                                 self.hparams.hami_train_loss== "normalization"))
@@ -587,6 +622,7 @@ class LNNP(LightningModule):
                                                             self,
                                                             self.hparams.energy_val_loss, 
                                                             self.hparams.basis, 
+                                                            self.hparams.xc,
                                                             "qh9" in self.hparams.data_name.lower(),
                                                             self.hparams.hami_train_loss=="scaled",
                                                             self.hparams.hami_train_loss== "normalization"))
