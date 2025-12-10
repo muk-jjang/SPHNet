@@ -13,11 +13,34 @@ from ..utility.eigen_solver import *
 from functools import partial
 import torch_geometric.transforms as T
 import random
+import os
+from tqdm import tqdm
 HATREE_TO_KCAL = 627.5096
 BOHR2ANG = 0.5291772105638411 
 HA2eV    = 27.211396641308        # Hartree to eV conversion
 HA2meV   = HA2eV * 1000  
 HA_BOHR_2_meV_ANG    = HA2meV / BOHR2ANG    
+
+def get_overlap_matrix(batch_data, i, start, end, atomic_numbers, device, basis='def2-svp', scale=1.0):
+    """Get overlap matrix from batch_data or compute on-the-fly using PySCF."""
+    if 's1e' in batch_data:
+        overlap_matrix = batch_data['s1e'][i] / scale if scale != 1.0 else batch_data['s1e'][i]
+        overlap_tensor = torch.from_numpy(overlap_matrix).to(device)
+        # Ensure 2D shape [n_orb, n_orb]
+        if overlap_tensor.dim() == 3 and overlap_tensor.shape[0] == 1:
+            overlap_tensor = overlap_tensor.squeeze(0)
+        return overlap_tensor
+    else:
+        # Compute overlap matrix on-the-fly using PySCF
+        pos = batch_data['pos'][start:end].detach().cpu().numpy()
+        atomic_nums = atomic_numbers.detach().cpu().numpy()
+        mol, mf, _ = get_pyscf_obj_from_dataset(pos, atomic_nums, basis=basis, gpu=False)
+        s1e = mf.get_ovlp()
+        s1e_tensor = torch.from_numpy(s1e).to(device)
+        # Ensure 2D shape [n_orb, n_orb]
+        if s1e_tensor.dim() == 3 and s1e_tensor.shape[0] == 1:
+            s1e_tensor = s1e_tensor.squeeze(0)
+        return s1e_tensor
 
 class FloatCastDatasetWrapper(T.BaseTransform):
     """A transform that casts all floating point tensors to a given dtype.
@@ -757,7 +780,7 @@ class LNNP(LightningModule):
         return self.step(batch_data, "test", self.loss_func_list_test)
 
 
-    def step(self, batch_data, stage, loss_func_list=[]):
+    def step(self, batch_data, stage, loss_func_list=[], batch_idx=0):
         batch_data = self.data_transform(batch_data)
         with torch.set_grad_enabled(stage == "train" or self.enable_forces):
             # TODO: the model doesn't necessarily need to return a derivative once
@@ -790,9 +813,103 @@ class LNNP(LightningModule):
             self.log_dict(train_metrics, sync_dist=True)
             # if  train_metrics['step']%10 == 0:
             # print(train_metrics)
+        if stage == "test" and self.hparams.save_output_dump:
+            self.save_output_dump(batch=batch_data, batch_idx=batch_idx)   
+
         return error_dict["loss"]
 
+    def save_output_dump(self, batch, batch_idx):
+        log_dir = os.path.join(self.hparams.log_dir, "output_dump")
+        os.makedirs(log_dir, exist_ok=True)
+        # get rank if distributed training initialized
+        if torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+        else:
+            rank = 0
 
+        build_final_matrix = self.trainer.model.model.hami_model.build_final_matrix_general
+
+        pred_hamiltonian = build_final_matrix(
+            batch,
+            full_diag = batch['pred_hamiltonian_diagonal_blocks'],
+            full_non_diag = batch['pred_hamiltonian_non_diagonal_blocks']
+            )
+
+        gt_hamiltonian = build_final_matrix(
+            batch,
+            full_diag = batch['diag_hamiltonian'],
+            full_non_diag = batch['non_diag_hamiltonian']
+            )
+        # Try different field names for initial hamiltonian (different datasets use different names)
+        if hasattr(batch, 'Ham_init'):
+            gt_init_hamiltonian = batch.Ham_init
+        elif 'fock_init' in batch:
+            gt_init_hamiltonian = batch['fock_init']
+        elif 'init_fock' in batch:
+            gt_init_hamiltonian = batch['init_fock']
+        else:
+            raise AttributeError("Could not find initial hamiltonian field. Expected one of: Ham_init, fock_init, init_fock")
+
+        # Try different field names for overlap matrix
+        if hasattr(batch, 'overlap'):
+            gt_overlap = batch.overlap
+        elif 's1e' in batch:
+            gt_overlap = batch['s1e']
+        else:
+            raise AttributeError("Could not find overlap matrix field. Expected one of: overlap, s1e")
+        gt_dft_energy = batch.energy
+        gt_dft_force = batch.forces
+        poses = []
+        atoms = []
+
+        if "qh9" in self.hparams.data_name:
+            format = "pyscf_def2svp"
+            length_unit = "angstrom"
+        else:
+            format = "e3nn"
+            length_unit = "bohr"
+
+        batch_size = batch.batch.max().item() + 1
+        iter_bar = tqdm(range(batch.ptr.shape[0] -1), desc=f"Rank {rank} Saving output dumps")
+        for mol_idx in iter_bar:
+            start = batch.ptr[mol_idx]
+            end = batch.ptr[mol_idx + 1]
+
+            pos = batch.pos[start:end].cpu()
+            atoms = batch.atomic_numbers[start:end].cpu()
+            global_idx = batch.idx[mol_idx].item()
+            config = {
+                "overlap": gt_overlap[mol_idx],
+                "pos": pos,
+                "atoms": atoms,
+                "format": format,
+                "length_unit":length_unit,
+                "idx": global_idx
+            }
+
+            pred = {
+                "pred_hamiltonian": pred_hamiltonian[mol_idx].cpu(),
+                **config,
+            }
+
+            #file_index = f"rank{rank}_batch{batch_idx}_mol{mol_idx}"
+            file_index = f"mol{global_idx}"
+            torch.save(pred, os.path.join(log_dir, f"pred_{file_index}.pt"))
+            
+            gt_init_ham = gt_init_hamiltonian[mol_idx]
+            if isinstance(gt_init_ham, np.ndarray):
+                gt_init_ham = torch.from_numpy(gt_init_ham)
+
+            gt = {
+                "hamiltonian": gt_hamiltonian[mol_idx].cpu(),
+                "init_ham": gt_init_ham.cpu(),
+                "energy": gt_dft_energy[mol_idx].cpu(),
+                "force": gt_dft_force[mol_idx].cpu(),
+                **config,
+            }
+            torch.save(gt, os.path.join(log_dir, f"gt_{file_index}.pt")) 
+            
+        return
 
     def on_train_epoch_end(self):
         dm = self.trainer.datamodule
