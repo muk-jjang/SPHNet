@@ -37,6 +37,7 @@ class Config(BaseSchema):
     job_id: str = "auto"
     ckpt_path: str = '/data'
     log_dir: str = "./tmp"
+    save_output_dump: bool = False
     schedule: Dict[str, Any] = MISSING
     model: Dict[str, Any] = MISSING
     wandb: Dict[str, Any] = MISSING
