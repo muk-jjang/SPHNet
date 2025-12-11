@@ -39,10 +39,6 @@ def mapping_function(to_be_remapped, indice, remap_source, remap_target, remap_b
     remapping = hash_2, remap_target
     return remap_values(remapping, hash_1)
 
-
-
-
-
 T_co = TypeVar("T_co", covariant=True)
 
 class DatasetWrapper(Dataset[T_co], ABC):
@@ -150,7 +146,7 @@ def collate_fn_unified(long_cutoff_upper = 9, unit = 1):
                     processed[key].reshape(-1,1)
                 else:
                     processed[key].reshape(-1,3)
-            elif key in ['init_fock','h1e']:
+            elif key in ['init_fock','s1e']:
                 processed[key] = [list_of_data[i][key] for i in range(bs_mol)]
             elif key == "fock":
                 H_block = []

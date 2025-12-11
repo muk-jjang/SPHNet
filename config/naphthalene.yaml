@@ -3,16 +3,15 @@ defaults: # which model/schedule config file to use
 - schedule: polynomial 
 - _self_
 
-job_id: ethanol_split_25000_500_4500 # The checkpoint/log file is saved in ckpt_path/job_id
+job_id: naphthalene # The checkpoint/log file is saved in ckpt_path/job_id
 ckpt_path: outputs
 seed: 123
-log_dir: "outputs"
-save_output_dump: false
+log_dir: "naphthalene"
 debug: false
 
 wandb: # wandb configuration
-  open: False
-  wandb_api_key: 
+  open: True
+  wandb_api_key: 5289f0f8d525c80f997b8e51a8f805d35bf3f602
   wandb_project: SPHNet
   wandb_group: ""
   wandb_notes: ""
@@ -32,8 +31,8 @@ hami_model:
 use_sparse_tp: true # whether use the sparse tensor product gate
 sparsity: 0.3 #Sparsity ratio
 num_epochs: 3000000 #Maximum number of epochs
-max_steps: 200000 #Maximum number of training steps.
-batch_size: 10
+max_steps: 100000 #Maximum number of training steps.
+batch_size: 32
 inference_batch_size: 1
 dataloader_num_workers: 8
 lr: 5e-4
@@ -63,20 +62,20 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 # dataset_path : "/data/qh9stable/data.mdb"     # if the dataset is mdb format, enter the file path
 # # dataset_path : "/data/qh9dynamic/data.mdb"
 
-data_name: md17
+data_name: rmd-naphthalene
 basis: "def2-svp"
 xc: 'pbe0'
-dataset_path : "./dataset2/ethanol/data.lmdb/data.mdb"
+dataset_path : "./data/md-naphthalene"
 
 # data_name: custom
 # basis: "def2-svp"
 # dataset_path : "example_data/data.mdb"
 index_path : "."
 
-dataset_size : 30000 #the dataset size is used. This will decide the steps of different phases"
-train_ratio: 25000
-val_ratio: 500
-test_ratio: 4500
+dataset_size : -1 #the dataset size is used. This will decide the steps of different phases"
+train_ratio: 0.8
+val_ratio: 0.1
+test_ratio: 0.1
 used_cache: false
 ema_decay: 1 # 1 means trun off ema and (0,1) is turning on.
 unit: 1 # 627.503 if the unit in the dataset is kcal/mol, else set 1; the unit used in this model is hatree

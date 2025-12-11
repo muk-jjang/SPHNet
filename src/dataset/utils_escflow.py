@@ -7,7 +7,6 @@ from typing import Optional, List
 from tqdm import tqdm
 from copy import deepcopy
 from ase.data import chemical_symbols, atomic_numbers
-import psi4
 from e3nn import o3
 from torch import nn
 import time
@@ -473,6 +472,14 @@ class Onsite_3idx_Overlap_Integral:
         self.basis = basis
 
     def calc_Q(self, atom: str):
+        try:
+            import psi4
+        except ImportError:
+            raise ImportError(
+                "psi4 is required for Onsite_3idx_Overlap_Integral.calc_Q(). "
+                "Please install it with: conda install -c conda-forge psi4"
+            )
+        
         psi4.core.be_quiet()
 
         # NOTE: prevent Psi4 from moving the molecule in space.

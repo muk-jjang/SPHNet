@@ -7,10 +7,11 @@ job_id: malondialdehyde_split_25000_500_1478_pbe0 # The checkpoint/log file is s
 ckpt_path: outputs
 seed: 123
 log_dir: "outputs"
+save_output_dump: false
 debug: false
 
 wandb: # wandb configuration
-  open: False
+  open: True
   wandb_api_key: 5289f0f8d525c80f997b8e51a8f805d35bf3f602
   wandb_project: SPHNet
   wandb_group: ""
@@ -65,7 +66,7 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 data_name: md17
 basis: "def2-svp"
 xc: 'pbe0'
-dataset_path : "/home/sungjun/repos/SPHNet/dataset2/malondialdehyde/data.lmdb/data.mdb"
+dataset_path : "./dataset2/malondialdehyde/data.lmdb/data.mdb"
 
 # data_name: custom
 # basis: "def2-svp"

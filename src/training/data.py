@@ -10,7 +10,7 @@ from torch_scatter import scatter
 
 from .utils import make_splits
 
-from ..dataset.dataset_unified import LmdbDataset,get_data_default_config,MdbDataset
+from ..dataset.dataset_unified import LmdbDataset,get_data_default_config,MdbDataset, RMD17_DFT
 from ..dataset.utils import shard_discretizations,InMemoryDataset
 from ..dataset.utils import collate_fn_unified
 from omegaconf import MISSING, DictConfig
@@ -44,9 +44,23 @@ class DataModule(LightningDataModule):
         worker_rank = self.trainer.global_rank if is_distributed else 0
 
         if stage == "fit" or stage is None or self.train_dataset is None:
-            if "qh9" in self.data_name.lower() or "md17" in self.data_name.lower() or "custom" in self.data_name.lower():
-                dataset = MdbDataset(path = self.path,remove_init=self.config["remove_init"])
-                print("len dataset ",len(dataset))
+            if "qh9" in self.data_name.lower() or "md17" == self.data_name or "custom" in self.data_name.lower():
+                    dataset = MdbDataset(path = self.path,remove_init=self.config["remove_init"])
+                    print("len dataset ",len(dataset))
+            elif "rmd" in self.data_name.lower():
+                dataset = RMD17_DFT(
+                    self.path, 
+                    name=self.data_name,
+                    load_orbitals=self.config.get("load_orbitals", True),
+                    include_density=self.config.get("include_density", False),
+                    all_features=self.config.get("all_features", False),
+                    
+                    enable_hami = self.config["enable_hami"],
+                    old_blockbuild = False,
+                    basis = self.basis,
+                    remove_atomref_energy = self.config["remove_atomref_energy"],
+                    remove_init=self.config["remove_init"],
+                )
             else:
                 dataset = LmdbDataset(self.path,
                                       data_name=self.data_name,
@@ -177,9 +191,11 @@ class DataModule(LightningDataModule):
         if stage == "train":
             batch_size = self.config["batch_size"]
             shuffle = True
+            drop_last = True
         elif stage in ["val", "test"]:
             batch_size = self.config["inference_batch_size"]
             shuffle = False
+            drop_last = False
             
         num_batches = self._get_num_batches(len(dataset),batch_size)
         dl = DataLoader(
