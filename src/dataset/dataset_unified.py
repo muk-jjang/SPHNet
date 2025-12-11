@@ -931,7 +931,8 @@ class RMD17_DFT(Dataset):
             if connections
             else torch.zeros((2, 0), dtype=torch.int64)
         )
-
+        
+        neighbor_finder = RadiusGraph(r=3)
         data_object = AOData(
             pos=pos,
             atomic_numbers=atoms,
@@ -948,9 +949,11 @@ class RMD17_DFT(Dataset):
             #num_atoms=torch.tensor([[pos.shape[0]]], dtype=torch.int64),
             #Q=self.Q,
             #h_dim=torch.tensor([[self.h_dim]], dtype=torch.int64),
-            #full_edge_index=full_edge_index,
+            full_edge_index=full_edge_index,
         )
-
+        data_object = neighbor_finder(data_object)
+        min_nodes_foreachGroup = 4
+        build_label(data_object, num_labels=int(pos.shape[0]/min_nodes_foreachGroup), method='kmeans')
 
         if self.load_orbitals:
             data_object.orbital_energies = _to_tensor(sample["orbital_energies"][:]).view(1, -1)
@@ -958,8 +961,8 @@ class RMD17_DFT(Dataset):
 
         out = {'pos': data_object.pos.numpy().astype(np.float32), 
             'forces': data_object.forces.numpy().astype(np.float32),
-            # 'edge_index': data_object.edge_index.numpy(), 
-            # 'labels': data_object.labels.numpy(),
+            'edge_index': data_object.edge_index.numpy(), 
+            'labels': data_object.labels.numpy(),
             'atomic_numbers': data_object.atomic_numbers.numpy(),
             'molecule_size':data_object.pos.shape[0],
             "idx":dataset_idx
