@@ -263,9 +263,6 @@ class EnergyHamiError(ErrorMetric):
         hami_humo_lumo = torch.zeros_like(energy,dtype=torch.float64)
         target_humo_lumo = torch.zeros_like(energy,dtype=torch.float64)
         hami_coeff = torch.zeros_like(energy,dtype=torch.float64)
-        # hami_forces = torch.zeros(
-        #     batch_size, dtype=torch.float64, device=energy.device
-        # )
         target_hami = batch_data["hamiltonian"]
 
         for i in range(batch_size):
@@ -277,9 +274,6 @@ class EnergyHamiError(ErrorMetric):
             atomic_numbers = batch_data['atomic_numbers'][start:end].detach().cpu().numpy()
             mol, mf,factory = get_pyscf_obj_from_dataset(pos,atomic_numbers, basis=self.basis, 
                                                          xc=self.xc, gpu=False, verbose=1)
-            #gradient calculation
-            grad_frame = mf.nuc_grad_method()
-
             dm0 = mf.init_guess_by_minao()
             init_h = mf.get_fock(dm=dm0)
 
@@ -300,25 +294,8 @@ class EnergyHamiError(ErrorMetric):
             hami_coeff[i] = torch.cosine_similarity(torch.tensor(hami_mo_coeff), torch.tensor(target_mo_coeff), dim=0).abs().mean()
             # molecule energy difference
             hami_energy[i] = float(abs(hami_energy[i] - energy[i]))
-            # calculated forces difference -> MAE (pred - gt)
-            # cal_forces = -torch.from_numpy(
-            #     grad_frame.kernel(
-            #         mo_energy=mo_energy_pred, mo_coeff=hami_mo_coeff, mo_occ=mo_occ
-            #     )
-            # ).to(device=mol_forces.device, dtype=torch.float64)
-            # hami_forces[i] = torch.mean(torch.abs(cal_forces - mol_forces))
-            # hami_forces[i] = hami_forces[i] * HA_BOHR_2_meV_ANG
-            # print(f"cal_forces: {cal_forces.shape}")
-            # print(f"cal_forces: {cal_forces}")
-            # print(f"cal_forces_mean: {cal_forces.mean()}")
-            # print(f"forces: {mol_forces.shape}")
-            # print(f"forces_mean: {mol_forces.mean()}")
-            # print(f"forces: {mol_forces}")
-            # print(f"hami_force_mae: {hami_forces[i]}")
-            # print(f'hami_energy: {hami_energy[i] * HA2eV} eV')
             if factory is not None:factory.free_resources()
             
-        # return hami_energy, target_energy, hami_humo_lumo-target_humo_lumo, hami_coeff, hami_forces
         return hami_energy, target_energy, hami_humo_lumo-target_humo_lumo, hami_coeff
     
     def cal_loss(self, batch_data, error_dict = {}, metric = None):
