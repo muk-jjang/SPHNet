@@ -163,14 +163,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
     pred_mo_energy_occ = pred_mo_energy[:num_occ]
     gt_mo_energy_occ = gt_mo_energy[:num_occ]
     calc_mo_energy_occ = calc_mo_energy[:num_occ]
-    pred_mo_coeff = pred_mo_coeff[:, :num_occ]
-    gt_mo_coeff = gt_mo_coeff[:, :num_occ]
-    calc_mo_coeff = calc_mo_coeff[:, :num_occ]
-    
-    print(f'pre_mo_coeff shape: {pred_mo_coeff.shape}')
-    print(f'gt_mo_coeff shape: {gt_mo_coeff.shape}')
-    print(f'calc_mo_coeff shape: {calc_mo_coeff.shape}')
-
+    pred_mo_occ_coeff = pred_res["sliced_orbital_coefficients"]
+    gt_mo_occ_coeff = gt_res["sliced_orbital_coefficients"]
+    calc_mo_occ_coeff = calc_res["sliced_orbital_coefficients"]
 
     result = {
         "data_index": data_index,
@@ -203,9 +198,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "pred_force_norm_diff (pred-calc_forces)": abs(pred_forces_norm - calc_forces_norm).mean(),
         "gt_force_norm_diff (gt-calc_forces)": abs(gt_forces_norm - calc_forces_norm).mean(),
 
-        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(torch.tensor(pred_mo_coeff), torch.tensor(gt_mo_coeff), dim=1).abs().mean(),
-        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(torch.tensor(pred_mo_coeff), torch.tensor(calc_mo_coeff), dim=1).abs().mean(),
-        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_coeff), torch.tensor(calc_mo_coeff), dim=1).abs().mean(),
+        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(gt_mo_occ_coeff), dim=1).abs().mean(),
+        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
+        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
 
         "occupied_orbital_energy_mae (pred-gt)": np.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (pred-calc)": np.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean(),
@@ -238,7 +233,7 @@ if __name__ == "__main__":
     parser.add_argument("--gt_prefix", type=str, default="gt_")
     parser.add_argument("--num_procs", type=int, default=1)
     parser.add_argument("--debug", default=False, action="store_true")
-    parser.add_argument("--size_limit", type=int, default=10)
+    parser.add_argument("--size_limit", type=int, default=1)
     args = parser.parse_args()
 
     dir_path = args.dir_path
