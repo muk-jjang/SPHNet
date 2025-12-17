@@ -44,6 +44,7 @@ enable_hami_orbital_energy: false # set it to true for WALoss
 hami_train_loss: 'maemse'
 hami_val_loss: 'mae'
 ngpus: 1
+devices: [0]
 num_nodes: 1
 precision: 32 # the precison for training, can use 16 for mixed precision
 gradient_clip_val: 5.0
