@@ -819,7 +819,7 @@ class LNNP(LightningModule):
         return error_dict["loss"]
 
     def save_output_dump(self, batch, batch_idx):
-        log_dir = os.path.join(self.hparams.log_dir, "output_dump")
+        log_dir = os.path.join(self.hparams.log_dir, "output_dump_batch")
         os.makedirs(log_dir, exist_ok=True)
         # get rank if distributed training initialized
         if torch.distributed.is_initialized():
@@ -893,7 +893,7 @@ class LNNP(LightningModule):
             }
 
             #file_index = f"rank{rank}_batch{batch_idx}_mol{mol_idx}"
-            file_index = f"mol{global_idx}"
+            file_index = f"batch{batch_idx}_mol{global_idx}"
             torch.save(pred, os.path.join(log_dir, f"pred_{file_index}.pt"))
             
             gt_init_ham = gt_init_hamiltonian[mol_idx]
