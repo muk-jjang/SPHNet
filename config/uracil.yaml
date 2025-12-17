@@ -7,6 +7,7 @@ job_id: uracil_split_25000_500_4500_pbe0 # The checkpoint/log file is saved in c
 ckpt_path: outputs
 seed: 123
 log_dir: "outputs"
+save_output_dump: false
 debug: false
 
 wandb: # wandb configuration
@@ -44,6 +45,7 @@ enable_hami_orbital_energy: false # set it to true for WALoss
 hami_train_loss: 'maemse'
 hami_val_loss: 'mae'
 ngpus: 1
+devices: [0]
 num_nodes: 1
 precision: 32 # the precison for training, can use 16 for mixed precision
 gradient_clip_val: 5.0
@@ -65,7 +67,7 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 data_name: md17
 basis: "def2-svp"
 xc: 'pbe0'
-dataset_path : 
+dataset_path : ./dataset2/uracil/data.lmdb/data.mdb
 
 # data_name: custom
 # basis: "def2-svp"

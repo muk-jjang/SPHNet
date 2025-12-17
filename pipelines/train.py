@@ -123,7 +123,9 @@ def main(config):
     trainer = pl.Trainer(
         max_epochs=config.num_epochs,
         max_steps=config.max_steps,
-        devices=list(range(config.ngpus)),
+        ##TODO: WANET repo 참고하여 device 부분 수정
+        # devices=list(range(config.ngpus)),
+        devices=config.devices,
         num_nodes=config.num_nodes,
         default_root_dir=config.log_dir,
         callbacks=callbacks,
