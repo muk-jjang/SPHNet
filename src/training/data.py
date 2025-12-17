@@ -205,9 +205,9 @@ class DataModule(LightningDataModule):
             num_workers=self.config["dataloader_num_workers"],
             collate_fn = collate_fn_unified(long_cutoff_upper = 9,unit = self.config["unit"]),
             # max_num_batches=num_batches,
-            drop_last=True,
+            drop_last=drop_last,
             pin_memory=True,
-            persistent_workers=False,  # 워커를 매 epoch마다 재시작하여 LMDB 환경 문제 방지
+            # persistent_workers=False,  # 워커를 매 epoch마다 재시작하여 LMDB 환경 문제 방지
         )
 
         return dl

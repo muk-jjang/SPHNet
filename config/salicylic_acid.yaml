@@ -3,7 +3,7 @@ defaults: # which model/schedule config file to use
 - schedule: polynomial 
 - _self_
 
-job_id: naphthalene # The checkpoint/log file is saved in ckpt_path/job_id
+job_id: salicylic_acid # The checkpoint/log file is saved in ckpt_path/job_id
 ckpt_path: outputs
 seed: 123
 log_dir: "outputs"
@@ -63,10 +63,10 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 # dataset_path : "/data/qh9stable/data.mdb"     # if the dataset is mdb format, enter the file path
 # # dataset_path : "/data/qh9dynamic/data.mdb"
 
-data_name: rmd-naphthalene
+data_name: rmd-salicylic_acid
 basis: "def2-svp"
 xc: 'pbe0'
-dataset_path : "/nas/qhflow-mlff/dataset/md-naphthalene"
+dataset_path : "/nas/qhflow-mlff/dataset/md-salicylic_acid"
 
 # data_name: custom
 # basis: "def2-svp"

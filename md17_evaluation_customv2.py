@@ -10,7 +10,7 @@ from multiprocessing import Pool
 from tqdm import tqdm
 import warnings
 import json
-
+import sys
 # Suppress FutureWarning about torch.load
 warnings.filterwarnings('ignore', category=FutureWarning)
 
@@ -24,16 +24,19 @@ def process_single_molecule(pred_file_path, gt_file_path,
     gt_data = torch.load(gt_file_path)
 
     data_index = gt_data["idx"]
+    molecule_start_time = time.time()
+    print(f"[Process {os.getpid()}] Starting molecule {data_index} at {time.strftime('%H:%M:%S')}", flush=True)
 
     atoms = gt_data["atoms"]
     pos = gt_data["pos"] * BOHR2ANG
-
     calc_mf = init_pyscf_mf(atoms, pos, unit=unit, xc=xc, basis=basis)
     grad_frame = calc_mf.nuc_grad_method()
     calc_mf.conv_tol = 1e-7
     calc_mf.grids.level = 3
     calc_mf.grids.prune = None
+    calc_mf.init_guess = "minao"
     calc_mf.small_rho_cutoff = 1e-12
+
     DO_NEW_CALC = True
     #try:
     # Check if calculated data exists
@@ -49,8 +52,11 @@ def process_single_molecule(pred_file_path, gt_file_path,
     else:
         calc_data = gt_data.copy()  # Use copy to avoid modifying original
         start_time = time.time()
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Starting SCF calculation...", flush=True)
         calc_mf.kernel()
-        calc_data["calc_time"] = time.time() - start_time
+        scf_time = time.time() - start_time
+        calc_data["calc_time"] = scf_time
+        print(f"[Process {os.getpid()}] Molecule {data_index}: SCF completed in {scf_time:.2f}s", flush=True)
         calc_data["hamiltonian"] = torch.tensor(calc_mf.get_fock(dm=calc_mf.make_rdm1()), dtype=torch.float64)
         calc_data["overlap"] = torch.tensor(calc_mf.get_ovlp(), dtype=torch.float64)
         calc_data["density_matrix"] = torch.tensor(calc_mf.make_rdm1(), dtype=torch.float64)
@@ -58,7 +64,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_data["xc"] = xc
         calc_data["basis"] = basis
         # calc_data["scf_cycles"] = calc_mf.cycles
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing initial forces...", flush=True)
+        force_start = time.time()
         calc_data["forces"] = torch.tensor(-grad_frame.kernel(), dtype=torch.float64)
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Initial forces completed in {time.time() - force_start:.2f}s", flush=True)
 
         calc_overlap = calc_data["overlap"].unsqueeze(0) # (gt_overlap - calc_overlap) has float32 precision error (1e^-7)
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
@@ -74,7 +83,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
         mo_occ = calc_mf.get_occ(calc_mo_energy, calc_mo_coeff)
         calc_data["mo_occ"] = mo_occ
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing calc forces with MO...", flush=True)
+        force_start = time.time()
         calc_forces = -grad_frame.kernel(mo_energy=calc_mo_energy, mo_coeff=calc_mo_coeff, mo_occ=mo_occ)
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Calc forces completed in {time.time() - force_start:.2f}s", flush=True)
         calc_data["calc_forces"] = calc_forces
 
         # save calc_data
@@ -141,12 +153,18 @@ def process_single_molecule(pred_file_path, gt_file_path,
         
         pred_mo_occ = calc_mf.get_occ(pred_mo_energy, pred_mo_coeff)
         pred_data["mo_occ"] = pred_mo_occ
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing pred forces...", flush=True)
+        force_start = time.time()
         pred_forces = -grad_frame.kernel(mo_energy=pred_mo_energy, mo_coeff=-pred_mo_coeff, mo_occ=pred_mo_occ)
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Pred forces completed in {time.time() - force_start:.2f}s", flush=True)
         pred_data["calc_forces"] = pred_forces
 
         gt_mo_occ = calc_mf.get_occ(gt_mo_energy, gt_mo_coeff)
         gt_data["mo_occ"] = gt_mo_occ
+        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing gt forces...", flush=True)
+        force_start = time.time()
         gt_forces = -grad_frame.kernel(mo_energy=gt_mo_energy, mo_coeff=-gt_mo_coeff, mo_occ=gt_mo_occ)
+        print(f"[Process {os.getpid()}] Molecule {data_index}: GT forces completed in {time.time() - force_start:.2f}s", flush=True)
         gt_data["calc_forces"] = gt_forces
 
         # if not debug:
@@ -198,13 +216,23 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "pred_force_norm_diff (pred-calc_forces)": abs(pred_forces_norm - calc_forces_norm).mean(),
         "gt_force_norm_diff (gt-calc_forces)": abs(gt_forces_norm - calc_forces_norm).mean(),
 
-        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(gt_mo_occ_coeff), dim=1).abs().mean(),
-        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
-        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
+        # "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(gt_mo_occ_coeff), dim=1).abs().mean(),
+        # "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
+        # "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
+
+
+        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=1).abs().mean(),
+        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
+        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(gt_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
+
 
         "occupied_orbital_energy_mae (pred-gt)": np.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (pred-calc)": np.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (gt-calc)": np.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean(),
+
+        # "occupied_orbital_energy_mae (pred-gt)": torch.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean().item(),
+        # "occupied_orbital_energy_mae (pred-calc)": torch.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean().item(),
+        # "occupied_orbital_energy_mae (gt-calc)": torch.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean().item(),
 
         "overlap_diff (gt-calc)": np.abs(gt_overlap - calc_overlap).mean(),
     }
@@ -220,6 +248,8 @@ def process_single_molecule(pred_file_path, gt_file_path,
             "error_count": data_index,
         }
     """
+    total_time = time.time() - molecule_start_time
+    print(f"[Process {os.getpid()}] Molecule {data_index}: COMPLETED in {total_time:.2f}s total", flush=True)
     return result
 
 
@@ -228,7 +258,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir_path", type=str, default="./outputs/ethanol_split_25000_500_4500/output_dump")
+    parser.add_argument("--dir_path", type=str, default="/nas/seongjun/sphnet/aspirin/output_dump_batch")
     parser.add_argument("--pred_prefix", type=str, default="pred_")
     parser.add_argument("--gt_prefix", type=str, default="gt_")
     parser.add_argument("--num_procs", type=int, default=1)
@@ -249,9 +279,9 @@ if __name__ == "__main__":
 
     # apply multiprocessing to process list_pred_paths and list_gt_paths
     num_procs = args.num_procs
-
     # Create list of (pred_path, gt_path) tuples
     file_pairs = list(zip(list_pred_paths, list_gt_paths))
+    
     if args.debug:
         args.size_limit = 1
     if args.size_limit > 0:
@@ -301,8 +331,9 @@ if __name__ == "__main__":
     print("="*80)
 
     dir_dir_path = os.path.dirname(dir_path)
+    dataset_name = dir_path.split("/")[-2]
     # Save evaluation results
-    # output_file = os.path.join(dir_dir_path, "evaluation_results.json")
-    # with open(output_file, "w") as f:
-    #     json.dump(evaluation_result, f, indent=4)
-    # print(f"\nEvaluation results saved to: {output_file}")
+    output_file = os.path.join("./outputs", f"{dataset_name}_evaluation_results.json")
+    with open(output_file, "w") as f:
+        json.dump(evaluation_result, f, indent=4)
+    print(f"\nEvaluation results saved to: {output_file}")
