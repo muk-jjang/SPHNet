@@ -216,6 +216,7 @@ def calc_dm0_from_ham_(atoms, overlap, hamiltonian, output_res=True):
             "dm0": dm0,
             "orbital_energies": orbital_energies,
             "orbital_coefficients": orbital_coefficients,
+            "sliced_orbital_coefficients": sliced_orbital_coefficients,
             "num_orb": num_orb,
             "overlap": overlap,
             "hamiltonian": hamiltonian,
