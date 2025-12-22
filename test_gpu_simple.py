@@ -3,12 +3,7 @@
 
 import os
 import sys
-
-# Set CUDA environment variables before importing cupy
-os.environ['CUDA_HOME'] = '/usr/local/cuda-12.6'
-os.environ['CUDA_PATH'] = '/usr/local/cuda-12.6'
-os.environ['PATH'] = '/usr/local/cuda-12.6/bin:' + os.environ.get('PATH', '')
-os.environ['LD_LIBRARY_PATH'] = '/usr/local/cuda-12.6/lib64:' + os.environ.get('LD_LIBRARY_PATH', '')
+import glob
 
 # Verify CUDA setup
 print(f"CUDA_HOME: {os.environ.get('CUDA_HOME')}")
@@ -45,8 +40,8 @@ def test_gpu_simple():
     print(f"{'='*60}")
 
     try:
-        # Initialize with GPU
-        calc_mf = init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp", use_gpu=True)
+        # Initialize with GPU 0
+        calc_mf = init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp", use_gpu=0)
         calc_mf.conv_tol = 1e-7
 
         print("Running SCF calculation on GPU...")

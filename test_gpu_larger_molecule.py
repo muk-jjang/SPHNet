@@ -88,24 +88,15 @@ def test_aspirin_performance(use_gpu=False):
 
 if __name__ == "__main__":
     import os
-    # Set CUDA environment for GPU4PySCF before importing cupy
-    if 'CUDA_HOME' not in os.environ and os.path.exists('/usr/local/cuda-12.6'):
-        os.environ['CUDA_HOME'] = '/usr/local/cuda-12.6'
-        os.environ['CUDA_PATH'] = '/usr/local/cuda-12.6'
-        os.environ['PATH'] = '/usr/local/cuda-12.6/bin:' + os.environ.get('PATH', '')
-        os.environ['LD_LIBRARY_PATH'] = '/usr/local/cuda-12.6/lib64:' + os.environ.get('LD_LIBRARY_PATH', '')
-
-
     print("\n" + "="*60)
     print("GPU4PySCF Performance Test - Aspirin Molecule")
     print("="*60)
 
-    # Test CPU
-    cpu_results = test_aspirin_performance(use_gpu=False)
-
     # Test GPU
     try:
         gpu_results = test_aspirin_performance(use_gpu=True)
+        # Test CPU
+        cpu_results = test_aspirin_performance(use_gpu=False)
 
         # Compare results
         print("\n" + "="*60)
