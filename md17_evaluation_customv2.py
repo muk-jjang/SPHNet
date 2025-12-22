@@ -11,6 +11,7 @@ from tqdm import tqdm
 import warnings
 import json
 import sys
+# import cupy as cp
 
 # Set CUDA environment for GPU4PySCF before importing cupy
 if 'CUDA_HOME' not in os.environ and os.path.exists('/usr/local/cuda-12.6'):
@@ -45,7 +46,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
     calc_mf.init_guess = "minao"
     calc_mf.small_rho_cutoff = 1e-12
 
-    DO_NEW_CALC = True
+    DO_NEW_CALC = False
     #try:
     # Check if calculated data exists
     if os.path.exists(calc_path) and not DO_NEW_CALC:
@@ -81,6 +82,8 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
         
         calc_density, calc_res = calc_dm0_from_ham(atoms, calc_overlap, calc_ham, transform=False)
+        # if use_gpu :
+        #     calc_density = cp.asarray(calc_density)
         calc_energy = calc_mf.energy_tot(calc_density)
         calc_data["calc_energy"] = calc_energy
 
@@ -135,6 +138,11 @@ def process_single_molecule(pred_file_path, gt_file_path,
             hamiltonian=pred_ham, 
             transform=False
             )
+
+        # Ensure density matrix is on GPU when using gpu4pyscf
+        # if use_gpu:
+        #     pred_density = cp.asarray(pred_density)
+
         pred_energy = calc_mf.energy_tot(pred_density)
         pred_data["calc_energy"] = pred_energy
         
@@ -144,6 +152,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
             hamiltonian=gt_ham, 
             transform=False
             )
+
+        # if use_gpu:
+        #     gt_density = cp.asarray(gt_density)
+
         gt_energy = calc_mf.energy_tot(gt_density)
         gt_data["calc_energy"] = gt_energy
         
@@ -161,7 +173,13 @@ def process_single_molecule(pred_file_path, gt_file_path,
         pred_data["mo_occ"] = pred_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing pred forces...", flush=True)
         force_start = time.time()
-        pred_forces = -grad_frame.kernel(mo_energy=pred_mo_energy, mo_coeff=-pred_mo_coeff, mo_occ=pred_mo_occ)
+        # Convert to NumPy on CPU; handle both NumPy and CuPy arrays
+
+        pred_forces = -grad_frame.kernel(
+            mo_energy=pred_mo_energy,
+            mo_coeff=-pred_mo_coeff,
+            mo_occ=pred_mo_occ,
+        )
         print(f"[Process {os.getpid()}] Molecule {data_index}: Pred forces completed in {time.time() - force_start:.2f}s", flush=True)
         pred_data["calc_forces"] = pred_forces
 
@@ -169,7 +187,12 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_data["mo_occ"] = gt_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing gt forces...", flush=True)
         force_start = time.time()
-        gt_forces = -grad_frame.kernel(mo_energy=gt_mo_energy, mo_coeff=-gt_mo_coeff, mo_occ=gt_mo_occ)
+
+        gt_forces = -grad_frame.kernel(
+            mo_energy=gt_mo_energy,
+            mo_coeff=-gt_mo_coeff,
+            mo_occ=gt_mo_occ,
+        )
         print(f"[Process {os.getpid()}] Molecule {data_index}: GT forces completed in {time.time() - force_start:.2f}s", flush=True)
         gt_data["calc_forces"] = gt_forces
 
@@ -187,9 +210,14 @@ def process_single_molecule(pred_file_path, gt_file_path,
     pred_mo_energy_occ = pred_mo_energy[:num_occ]
     gt_mo_energy_occ = gt_mo_energy[:num_occ]
     calc_mo_energy_occ = calc_mo_energy[:num_occ]
-    pred_mo_occ_coeff = pred_res["sliced_orbital_coefficients"]
-    gt_mo_occ_coeff = gt_res["sliced_orbital_coefficients"]
-    calc_mo_occ_coeff = calc_res["sliced_orbital_coefficients"]
+    # For GPU mode, bring occupied energies back to CPU numpy for metric math
+    # if use_gpu:
+    #     pred_mo_energy_occ = cp.asnumpy(pred_mo_energy_occ)
+    #     gt_mo_energy_occ = cp.asnumpy(gt_mo_energy_occ)
+    #     calc_mo_energy_occ = np.asarray(calc_mo_energy_occ, dtype=np.float64)
+    pred_mo_occ_coeff = torch.tensor(pred_mo_coeff[:, :num_occ])
+    gt_mo_occ_coeff = torch.tensor(gt_mo_coeff[:, :num_occ])
+    calc_mo_occ_coeff = torch.tensor(calc_mo_coeff[:, :num_occ])
 
     result = {
         "data_index": data_index,
@@ -227,9 +255,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
         # "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
 
 
-        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=1).abs().mean(),
-        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
-        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(gt_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
+        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=0).abs().mean(),
+        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=0).abs().mean(),
+        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(gt_mo_occ_coeff, calc_mo_occ_coeff, dim=0).abs().mean(),
 
 
         "occupied_orbital_energy_mae (pred-gt)": np.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean(),
@@ -269,7 +297,7 @@ if __name__ == "__main__":
     parser.add_argument("--gt_prefix", type=str, default="gt_")
     parser.add_argument("--num_procs", type=int, default=1)
     parser.add_argument("--debug", default=False, action="store_true")
-    parser.add_argument("--size_limit", type=int, default=1)
+    parser.add_argument("--size_limit", type=int, default=-1)
     parser.add_argument("--use_gpu", default=False, action="store_true", help="Enable GPU acceleration with GPU4PySCF")
     args = parser.parse_args()
 
