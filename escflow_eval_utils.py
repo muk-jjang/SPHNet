@@ -74,12 +74,10 @@ def init_pyscf_mf_(atoms, pos, pos_factor=1.0, xc="pbe", basis="def2svp", use_gp
 
     if use_gpu >= 0:
         try:
-            import os
             from gpu4pyscf import dft as gpu_dft
 
-            # Set the specific GPU device
-            os.environ['CUDA_VISIBLE_DEVICES'] = str(use_gpu)
-
+            # Note: CUDA_VISIBLE_DEVICES must be set before importing gpu4pyscf
+            # This should be done at the script level, not here
             mf = gpu_dft.RKS(mol).density_fit()
             mf.verbose = 0  # Reduce GPU verbosity
         except ImportError:

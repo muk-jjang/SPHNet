@@ -32,8 +32,23 @@ def _convert_density_for_gpu(density, use_gpu):
     else:
         return density
 
+def _ensure_numpy_float64(array):
+    """
+    Convert array to NumPy float64, handling CuPy arrays, PyTorch tensors, etc.
+    This ensures compatibility with PySCF gradient calculations.
+    """
+    # Handle CuPy arrays (from GPU calculations)
+    if hasattr(array, 'get'):
+        array = array.get()
+    # Handle PyTorch tensors
+    elif hasattr(array, 'cpu'):
+        array = array.cpu().numpy()
+    # Convert to NumPy float64
+    return np.asarray(array, dtype=np.float64)
+
 def process_single_molecule(pred_file_path, gt_file_path,
-    unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1
+    unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1,
+    DO_NEW_CALC=False
 ):
     dir_path = os.path.dirname(pred_file_path)
     calc_path = pred_file_path.replace("pred_", "calc_")
@@ -95,13 +110,13 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_energy = calc_mf.energy_tot(calc_density_converted)
         calc_data["calc_energy"] = calc_energy
 
-        calc_mo_energy = calc_res["orbital_energies"].squeeze().numpy()
-        calc_mo_coeff = calc_res["orbital_coefficients"].squeeze().numpy()
+        calc_mo_energy = _ensure_numpy_float64(calc_res["orbital_energies"].squeeze())
+        calc_mo_coeff = _ensure_numpy_float64(calc_res["orbital_coefficients"].squeeze())
         calc_data["calc_mo_energy"] = calc_mo_energy
         calc_data["calc_mo_coeff"] = calc_mo_coeff
 
-        mo_occ = calc_mf.get_occ(calc_mo_energy, calc_mo_coeff)
-        calc_data["mo_occ"] = mo_occ
+        calc_mo_occ = _ensure_numpy_float64(calc_mf.get_occ(calc_mo_energy, calc_mo_coeff))
+        calc_data["mo_occ"] = calc_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing calc forces with MO...", flush=True)
         force_start = time.time()
         # For GPU mode, convert mo_coeff, mo_energy, and mo_occ to cupy arrays and temporarily set in calc_mf
@@ -186,23 +201,17 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_energy = calc_mf.energy_tot(gt_density_converted)
         gt_data["calc_energy"] = gt_energy
         
-        pred_mo_energy = pred_res["orbital_energies"].squeeze().cpu().numpy() if hasattr(pred_res["orbital_energies"], 'cpu') else pred_res["orbital_energies"].squeeze().numpy()
-        pred_mo_coeff = pred_res["orbital_coefficients"].squeeze().cpu().numpy() if hasattr(pred_res["orbital_coefficients"], 'cpu') else pred_res["orbital_coefficients"].squeeze().numpy()
-        # Ensure correct dtype for gradient calculation
-        pred_mo_energy = np.asarray(pred_mo_energy, dtype=np.float64)
-        pred_mo_coeff = np.asarray(pred_mo_coeff, dtype=np.float64)
+        pred_mo_energy = _ensure_numpy_float64(pred_res["orbital_energies"].squeeze())
+        pred_mo_coeff = _ensure_numpy_float64(pred_res["orbital_coefficients"].squeeze())
         pred_data["calc_mo_energy"] = pred_mo_energy
         pred_data["calc_mo_coeff"] = pred_mo_coeff
 
-        gt_mo_energy = gt_res["orbital_energies"].squeeze().cpu().numpy() if hasattr(gt_res["orbital_energies"], 'cpu') else gt_res["orbital_energies"].squeeze().numpy()
-        gt_mo_coeff = gt_res["orbital_coefficients"].squeeze().cpu().numpy() if hasattr(gt_res["orbital_coefficients"], 'cpu') else gt_res["orbital_coefficients"].squeeze().numpy()
-        # Ensure correct dtype for gradient calculation
-        gt_mo_energy = np.asarray(gt_mo_energy, dtype=np.float64)
-        gt_mo_coeff = np.asarray(gt_mo_coeff, dtype=np.float64)
+        gt_mo_energy = _ensure_numpy_float64(gt_res["orbital_energies"].squeeze())
+        gt_mo_coeff = _ensure_numpy_float64(gt_res["orbital_coefficients"].squeeze())
         gt_data["calc_mo_energy"] = gt_mo_energy
         gt_data["calc_mo_coeff"] = gt_mo_coeff
 
-        pred_mo_occ = calc_mf.get_occ(pred_mo_energy, pred_mo_coeff)
+        pred_mo_occ = _ensure_numpy_float64(calc_mf.get_occ(pred_mo_energy, pred_mo_coeff))
         pred_data["mo_occ"] = pred_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing pred forces...", flush=True)
         force_start = time.time()
@@ -242,7 +251,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
         print(f"[Process {os.getpid()}] Molecule {data_index}: Pred forces completed in {time.time() - force_start:.2f}s", flush=True)
         pred_data["calc_forces"] = pred_forces
 
-        gt_mo_occ = calc_mf.get_occ(gt_mo_energy, gt_mo_coeff)
+        gt_mo_occ = _ensure_numpy_float64(calc_mf.get_occ(gt_mo_energy, gt_mo_coeff))
         gt_data["mo_occ"] = gt_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing gt forces...", flush=True)
         force_start = time.time()
@@ -385,7 +394,14 @@ if __name__ == "__main__":
     parser.add_argument("--debug", default=False, action="store_true")
     parser.add_argument("--size_limit", type=int, default=1)
     parser.add_argument("--use_gpu", type=int, default=-1, help="GPU device ID to use (-1 for CPU, 0-7 for specific GPU)")
+    parser.add_argument("--do_new_calc", default=False, action="store_true")
     args = parser.parse_args()
+
+    # CRITICAL: Set CUDA_VISIBLE_DEVICES immediately after parsing arguments
+    # This must happen before ANY GPU library operations (gpu4pyscf, cupy, etc.)
+    if args.use_gpu >= 0:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(args.use_gpu)
+        print(f"Setting CUDA_VISIBLE_DEVICES={args.use_gpu} before GPU initialization")
 
     dir_path = args.dir_path
     pred_prefix = args.pred_prefix
@@ -416,12 +432,12 @@ if __name__ == "__main__":
 
     if  num_procs == 1:
         iter_bar = tqdm(file_pairs, desc="Processing molecules")
-        results = [process_single_molecule(pred_path, gt_path, debug=args.debug, use_gpu=args.use_gpu) for pred_path, gt_path in iter_bar]
+        results = [process_single_molecule(pred_path, gt_path, debug=args.debug, use_gpu=args.use_gpu, DO_NEW_CALC=args.do_new_calc) for pred_path, gt_path in iter_bar]
     else:
         # Process with multiprocessing
         # Note: For GPU mode, create a wrapper to pass use_gpu flag
         from functools import partial
-        process_func = partial(process_single_molecule, debug=args.debug, use_gpu=args.use_gpu)
+        process_func = partial(process_single_molecule, debug=args.debug, use_gpu=args.use_gpu, DO_NEW_CALC=args.do_new_calc)
         with Pool(processes=num_procs) as pool:
             results = list(tqdm(
                 pool.starmap(process_func, file_pairs),
@@ -461,7 +477,7 @@ if __name__ == "__main__":
     dir_dir_path = os.path.dirname(dir_path)
     dataset_name = dir_path.split("/")[-2]
     # Save evaluation results
-    output_file = os.path.join("./outputs", f"{dataset_name}_evaluation_results.json")
+    output_file = os.path.join(dir_dir_path, f"{dataset_name}_evaluation_results.json")
     with open(output_file, "w") as f:
         json.dump(evaluation_result, f, indent=4)
     print(f"\nEvaluation results saved to: {output_file}")
