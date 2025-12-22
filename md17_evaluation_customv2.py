@@ -12,18 +12,29 @@ import warnings
 import json
 import sys
 
-# Set CUDA environment for GPU4PySCF before importing cupy
-if 'CUDA_HOME' not in os.environ and os.path.exists('/usr/local/cuda-12.6'):
-    os.environ['CUDA_HOME'] = '/usr/local/cuda-12.6'
-    os.environ['CUDA_PATH'] = '/usr/local/cuda-12.6'
-    os.environ['PATH'] = '/usr/local/cuda-12.6/bin:' + os.environ.get('PATH', '')
-    os.environ['LD_LIBRARY_PATH'] = '/usr/local/cuda-12.6/lib64:' + os.environ.get('LD_LIBRARY_PATH', '')
 
 # Suppress FutureWarning about torch.load
 warnings.filterwarnings('ignore', category=FutureWarning)
 
+def _convert_density_for_gpu(density, use_gpu):
+    """Convert density matrix to CuPy array if using GPU, otherwise return as-is."""
+    if use_gpu >= 0:
+        try:
+            import cupy as cp
+            # If density is a tensor, convert to numpy first
+            if hasattr(density, 'cpu'):
+                density_np = density.cpu().numpy()
+            else:
+                density_np = density
+            return cp.asarray(density_np)
+        except Exception as e:
+            print(f"Warning: Failed to convert density to CuPy: {e}, using CPU")
+            return density.cpu().numpy() if hasattr(density, 'cpu') else density
+    else:
+        return density
+
 def process_single_molecule(pred_file_path, gt_file_path,
-    unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=False
+    unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1
 ):
     dir_path = os.path.dirname(pred_file_path)
     calc_path = pred_file_path.replace("pred_", "calc_")
@@ -79,9 +90,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
         calc_overlap = calc_data["overlap"].unsqueeze(0) # (gt_overlap - calc_overlap) has float32 precision error (1e^-7)
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
-        
-        calc_density, calc_res = calc_dm0_from_ham(atoms, calc_overlap, calc_ham, transform=False)
-        calc_energy = calc_mf.energy_tot(calc_density)
+
+        calc_density, calc_res = calc_dm0_from_ham(atoms, calc_overlap, calc_ham, transform=False, return_tensor=(use_gpu >= 0))
+        calc_density_converted = _convert_density_for_gpu(calc_density, use_gpu)
+        calc_energy = calc_mf.energy_tot(calc_density_converted)
         calc_data["calc_energy"] = calc_energy
 
         calc_mo_energy = calc_res["orbital_energies"].squeeze().numpy()
@@ -132,33 +144,43 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_ham = matrix_transform_single(gt_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
         
         pred_density, pred_res = calc_dm0_from_ham(
-            atoms=atoms, 
-            overlap=gt_overlap, 
-            hamiltonian=pred_ham, 
-            transform=False
+            atoms=atoms,
+            overlap=gt_overlap,
+            hamiltonian=pred_ham,
+            transform=False,
+            return_tensor=(use_gpu >= 0)
             )
-        pred_energy = calc_mf.energy_tot(pred_density)
+        pred_density_converted = _convert_density_for_gpu(pred_density, use_gpu)
+        pred_energy = calc_mf.energy_tot(pred_density_converted)
         pred_data["calc_energy"] = pred_energy
-        
+
         gt_density, gt_res = calc_dm0_from_ham(
-            atoms=atoms, 
-            overlap=gt_overlap, 
-            hamiltonian=gt_ham, 
-            transform=False
+            atoms=atoms,
+            overlap=gt_overlap,
+            hamiltonian=gt_ham,
+            transform=False,
+            return_tensor=(use_gpu >= 0)
             )
-        gt_energy = calc_mf.energy_tot(gt_density)
+        gt_density_converted = _convert_density_for_gpu(gt_density, use_gpu)
+        gt_energy = calc_mf.energy_tot(gt_density_converted)
         gt_data["calc_energy"] = gt_energy
         
-        pred_mo_energy = pred_res["orbital_energies"].squeeze().numpy()
-        pred_mo_coeff = pred_res["orbital_coefficients"].squeeze().numpy()
+        pred_mo_energy = pred_res["orbital_energies"].squeeze().cpu().numpy() if hasattr(pred_res["orbital_energies"], 'cpu') else pred_res["orbital_energies"].squeeze().numpy()
+        pred_mo_coeff = pred_res["orbital_coefficients"].squeeze().cpu().numpy() if hasattr(pred_res["orbital_coefficients"], 'cpu') else pred_res["orbital_coefficients"].squeeze().numpy()
+        # Ensure correct dtype for gradient calculation
+        pred_mo_energy = np.asarray(pred_mo_energy, dtype=np.float64)
+        pred_mo_coeff = np.asarray(pred_mo_coeff, dtype=np.float64)
         pred_data["calc_mo_energy"] = pred_mo_energy
         pred_data["calc_mo_coeff"] = pred_mo_coeff
 
-        gt_mo_energy = gt_res["orbital_energies"].squeeze().numpy()
-        gt_mo_coeff = gt_res["orbital_coefficients"].squeeze().numpy()
+        gt_mo_energy = gt_res["orbital_energies"].squeeze().cpu().numpy() if hasattr(gt_res["orbital_energies"], 'cpu') else gt_res["orbital_energies"].squeeze().numpy()
+        gt_mo_coeff = gt_res["orbital_coefficients"].squeeze().cpu().numpy() if hasattr(gt_res["orbital_coefficients"], 'cpu') else gt_res["orbital_coefficients"].squeeze().numpy()
+        # Ensure correct dtype for gradient calculation
+        gt_mo_energy = np.asarray(gt_mo_energy, dtype=np.float64)
+        gt_mo_coeff = np.asarray(gt_mo_coeff, dtype=np.float64)
         gt_data["calc_mo_energy"] = gt_mo_energy
         gt_data["calc_mo_coeff"] = gt_mo_coeff
-        
+
         pred_mo_occ = calc_mf.get_occ(pred_mo_energy, pred_mo_coeff)
         pred_data["mo_occ"] = pred_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing pred forces...", flush=True)
@@ -272,7 +294,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_procs", type=int, default=1)
     parser.add_argument("--debug", default=False, action="store_true")
     parser.add_argument("--size_limit", type=int, default=1)
-    parser.add_argument("--use_gpu", default=False, action="store_true", help="Enable GPU acceleration with GPU4PySCF")
+    parser.add_argument("--use_gpu", type=int, default=-1, help="GPU device ID to use (-1 for CPU, 0-7 for specific GPU)")
     args = parser.parse_args()
 
     dir_path = args.dir_path
@@ -294,11 +316,13 @@ if __name__ == "__main__":
     if args.size_limit > 0:
         file_pairs = file_pairs[:args.size_limit]
 
-    if args.use_gpu and num_procs > 1:
-        print("Warning: GPU mode works best with --num_procs=1. Multiple processes may compete for GPU resources.")
-        print(f"Processing {len(file_pairs)} molecules with GPU and {num_procs} processes...")
+    if args.use_gpu >= 0:
+        print(f"GPU mode enabled: Using GPU {args.use_gpu}")
+        if num_procs > 1:
+            print("Warning: GPU mode works best with --num_procs=1. Multiple processes may compete for GPU resources.")
+        print(f"Processing {len(file_pairs)} molecules with GPU {args.use_gpu} and {num_procs} processes...")
     else:
-        print(f"Processing {len(file_pairs)} molecules with {num_procs} processes...")
+        print(f"Processing {len(file_pairs)} molecules with CPU and {num_procs} processes...")
 
     if  num_procs == 1:
         iter_bar = tqdm(file_pairs, desc="Processing molecules")
