@@ -1,3 +1,11 @@
+#!/usr/bin/env python
+"""
+GPU-optimized batch evaluation for MD17.
+
+This version processes multiple molecules in a batch-friendly way on GPU.
+Strategy: Use multiple GPU streams or distribute across available GPUs.
+"""
+
 import os
 import glob
 import torch
@@ -6,11 +14,11 @@ import time
 from escflow_eval_utils import init_pyscf_mf, calc_dm0_from_ham, matrix_transform_single
 from escflow_eval_utils import BOHR2ANG, HA2meV, HA_BOHR_2_meV_ANG
 import numpy as np
-from multiprocessing import Pool
 from tqdm import tqdm
 import warnings
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Set CUDA environment for GPU4PySCF before importing cupy
 if 'CUDA_HOME' not in os.environ and os.path.exists('/usr/local/cuda-12.6'):
@@ -19,12 +27,39 @@ if 'CUDA_HOME' not in os.environ and os.path.exists('/usr/local/cuda-12.6'):
     os.environ['PATH'] = '/usr/local/cuda-12.6/bin:' + os.environ.get('PATH', '')
     os.environ['LD_LIBRARY_PATH'] = '/usr/local/cuda-12.6/lib64:' + os.environ.get('LD_LIBRARY_PATH', '')
 
-# Suppress FutureWarning about torch.load
+# Suppress warnings
 warnings.filterwarnings('ignore', category=FutureWarning)
 
-def process_single_molecule(pred_file_path, gt_file_path,
-    unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=False
-):
+try:
+    import cupy as cp
+    GPU_AVAILABLE = cp.cuda.is_available()
+    NUM_GPUS = cp.cuda.runtime.getDeviceCount() if GPU_AVAILABLE else 0
+except ImportError:
+    GPU_AVAILABLE = False
+    NUM_GPUS = 0
+
+def process_single_molecule_gpu(pred_file_path, gt_file_path, gpu_id=0,
+                                unit="ang", xc="pbe", basis="def2svp", debug=False):
+    """
+    Process a single molecule on a specific GPU.
+
+    Args:
+        pred_file_path: Path to prediction file
+        gt_file_path: Path to ground truth file
+        gpu_id: GPU device ID to use
+        unit: Unit for positions
+        xc: Exchange-correlation functional
+        basis: Basis set
+        debug: Debug mode flag
+    """
+    # Set GPU device for this calculation
+    if GPU_AVAILABLE and NUM_GPUS > 1:
+        try:
+            cp.cuda.Device(gpu_id).use()
+            os.environ['CUDA_VISIBLE_DEVICES'] = str(gpu_id)
+        except:
+            pass
+
     dir_path = os.path.dirname(pred_file_path)
     calc_path = pred_file_path.replace("pred_", "calc_")
 
@@ -33,21 +68,19 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
     data_index = gt_data["idx"]
     molecule_start_time = time.time()
-    print(f"[Process {os.getpid()}] Starting molecule {data_index} at {time.strftime('%H:%M:%S')}", flush=True)
+    print(f"[GPU {gpu_id}] Starting molecule {data_index} at {time.strftime('%H:%M:%S')}", flush=True)
 
     atoms = gt_data["atoms"]
     pos = gt_data["pos"] * BOHR2ANG
-    calc_mf = init_pyscf_mf(atoms, pos, unit=unit, xc=xc, basis=basis, use_gpu=use_gpu)
+
+    # Use GPU acceleration
+    calc_mf = init_pyscf_mf(atoms, pos, unit=unit, xc=xc, basis=basis, use_gpu=True)
     grad_frame = calc_mf.nuc_grad_method()
     calc_mf.conv_tol = 1e-7
     calc_mf.grids.level = 3
-    calc_mf.grids.prune = None
-    calc_mf.init_guess = "minao"
-    calc_mf.small_rho_cutoff = 1e-12
 
     DO_NEW_CALC = True
-    #try:
-    # Check if calculated data exists
+
     if os.path.exists(calc_path) and not DO_NEW_CALC:
         calc_data = torch.load(calc_path, weights_only=False)
         calc_energy = calc_data["calc_energy"]
@@ -56,30 +89,30 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_mo_coeff = calc_data["calc_mo_coeff"]
         calc_ham = calc_data["hamiltonian"]
         calc_overlap = calc_data["overlap"]
-        
     else:
-        calc_data = gt_data.copy()  # Use copy to avoid modifying original
+        calc_data = gt_data.copy()
         start_time = time.time()
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Starting SCF calculation...", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Starting SCF calculation...", flush=True)
         calc_mf.kernel()
         scf_time = time.time() - start_time
         calc_data["calc_time"] = scf_time
-        print(f"[Process {os.getpid()}] Molecule {data_index}: SCF completed in {scf_time:.2f}s", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: SCF completed in {scf_time:.2f}s", flush=True)
+
         calc_data["hamiltonian"] = torch.tensor(calc_mf.get_fock(dm=calc_mf.make_rdm1()), dtype=torch.float64)
         calc_data["overlap"] = torch.tensor(calc_mf.get_ovlp(), dtype=torch.float64)
         calc_data["density_matrix"] = torch.tensor(calc_mf.make_rdm1(), dtype=torch.float64)
         calc_data["method"] = "RKS"
         calc_data["xc"] = xc
         calc_data["basis"] = basis
-        # calc_data["scf_cycles"] = calc_mf.cycles
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing initial forces...", flush=True)
+
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Computing initial forces...", flush=True)
         force_start = time.time()
         calc_data["forces"] = torch.tensor(-grad_frame.kernel(), dtype=torch.float64)
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Initial forces completed in {time.time() - force_start:.2f}s", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Initial forces completed in {time.time() - force_start:.2f}s", flush=True)
 
-        calc_overlap = calc_data["overlap"].unsqueeze(0) # (gt_overlap - calc_overlap) has float32 precision error (1e^-7)
+        calc_overlap = calc_data["overlap"].unsqueeze(0)
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
-        
+
         calc_density, calc_res = calc_dm0_from_ham(atoms, calc_overlap, calc_ham, transform=False)
         calc_energy = calc_mf.energy_tot(calc_density)
         calc_data["calc_energy"] = calc_energy
@@ -91,16 +124,15 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
         mo_occ = calc_mf.get_occ(calc_mo_energy, calc_mo_coeff)
         calc_data["mo_occ"] = mo_occ
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing calc forces with MO...", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Computing calc forces with MO...", flush=True)
         force_start = time.time()
         calc_forces = -grad_frame.kernel(mo_energy=calc_mo_energy, mo_coeff=calc_mo_coeff, mo_occ=mo_occ)
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Calc forces completed in {time.time() - force_start:.2f}s", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Calc forces completed in {time.time() - force_start:.2f}s", flush=True)
         calc_data["calc_forces"] = calc_forces
 
-        #save calc_data
         if not debug:
             torch.save(calc_data, calc_path)
-    
+
     if "remove_init" not in gt_data.keys():
         remove_init = True
         gt_data["remove_init"] = remove_init
@@ -125,28 +157,28 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
         pred_hamiltonian = pred_data["pred_hamiltonian"] + remove_init * gt_data["init_ham"].reshape(pred_data["pred_hamiltonian"].shape)
         pred_ham = matrix_transform_single(pred_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
-        
+
         gt_hamiltonian = gt_data["hamiltonian"] + remove_init * gt_data["init_ham"].reshape(gt_data["hamiltonian"].shape)
         gt_ham = matrix_transform_single(gt_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
-        
+
         pred_density, pred_res = calc_dm0_from_ham(
-            atoms=atoms, 
-            overlap=gt_overlap, 
-            hamiltonian=pred_ham, 
+            atoms=atoms,
+            overlap=gt_overlap,
+            hamiltonian=pred_ham,
             transform=False
-            )
+        )
         pred_energy = calc_mf.energy_tot(pred_density)
         pred_data["calc_energy"] = pred_energy
-        
+
         gt_density, gt_res = calc_dm0_from_ham(
-            atoms=atoms, 
-            overlap=gt_overlap, 
-            hamiltonian=gt_ham, 
+            atoms=atoms,
+            overlap=gt_overlap,
+            hamiltonian=gt_ham,
             transform=False
-            )
+        )
         gt_energy = calc_mf.energy_tot(gt_density)
         gt_data["calc_energy"] = gt_energy
-        
+
         pred_mo_energy = pred_res["orbital_energies"].squeeze().numpy()
         pred_mo_coeff = pred_res["orbital_coefficients"].squeeze().numpy()
         pred_data["calc_mo_energy"] = pred_mo_energy
@@ -156,21 +188,21 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_mo_coeff = gt_res["orbital_coefficients"].squeeze().numpy()
         gt_data["calc_mo_energy"] = gt_mo_energy
         gt_data["calc_mo_coeff"] = gt_mo_coeff
-        
+
         pred_mo_occ = calc_mf.get_occ(pred_mo_energy, pred_mo_coeff)
         pred_data["mo_occ"] = pred_mo_occ
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing pred forces...", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Computing pred forces...", flush=True)
         force_start = time.time()
         pred_forces = -grad_frame.kernel(mo_energy=pred_mo_energy, mo_coeff=-pred_mo_coeff, mo_occ=pred_mo_occ)
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Pred forces completed in {time.time() - force_start:.2f}s", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Pred forces completed in {time.time() - force_start:.2f}s", flush=True)
         pred_data["calc_forces"] = pred_forces
 
         gt_mo_occ = calc_mf.get_occ(gt_mo_energy, gt_mo_coeff)
         gt_data["mo_occ"] = gt_mo_occ
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing gt forces...", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: Computing gt forces...", flush=True)
         force_start = time.time()
         gt_forces = -grad_frame.kernel(mo_energy=gt_mo_energy, mo_coeff=-gt_mo_coeff, mo_occ=gt_mo_occ)
-        print(f"[Process {os.getpid()}] Molecule {data_index}: GT forces completed in {time.time() - force_start:.2f}s", flush=True)
+        print(f"[GPU {gpu_id}] Molecule {data_index}: GT forces completed in {time.time() - force_start:.2f}s", flush=True)
         gt_data["calc_forces"] = gt_forces
 
         if not debug:
@@ -183,7 +215,6 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
     num_occ = int(gt_data["atoms"].sum() / 2)
 
-    # Extract occupied orbital energies only
     pred_mo_energy_occ = pred_mo_energy[:num_occ]
     gt_mo_energy_occ = gt_mo_energy[:num_occ]
     calc_mo_energy_occ = calc_mo_energy[:num_occ]
@@ -193,131 +224,127 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
     result = {
         "data_index": data_index,
-
         "hamiltonian_diff (pred-gt)": abs(pred_ham - gt_ham).mean(),
         "hamiltonian_diff (pred-calc)": abs(pred_ham - calc_ham).mean(),
         "hamiltonian_diff (gt-calc)": abs(gt_ham - calc_ham).mean(),
-
         "pred_energy": pred_energy,
         "gt_energy": gt_energy,
         "calc_energy": calc_energy,
-        
         "energy_diff (pred-gt)": abs(pred_energy - gt_energy),
         "energy_diff (pred-calc_energy)": abs(pred_energy - calc_energy),
         "energy_diff (gt-calc_energy)": abs(gt_energy - calc_energy),
-
         "pred_force": pred_forces,
         "gt_force": gt_forces,
         "calc_force": calc_forces,
-
         "forces_diff l2 (pred-gt)": abs(pred_forces - gt_forces).mean(),
         "forces_diff l2 (pred-calc_forces)": abs(pred_forces - calc_forces).mean(),
         "forces_diff l2 (gt-calc_forces)": abs(gt_forces - calc_forces).mean(),
-
         "pred_force_norm": pred_forces_norm,
         "gt_force_norm": gt_forces_norm,
         "calc_force_norm": calc_forces_norm,
-
         "pred_force_norm_diff (pred-gt)": abs(pred_forces_norm - gt_forces_norm).mean(),
         "pred_force_norm_diff (pred-calc_forces)": abs(pred_forces_norm - calc_forces_norm).mean(),
         "gt_force_norm_diff (gt-calc_forces)": abs(gt_forces_norm - calc_forces_norm).mean(),
-
-        # "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(gt_mo_occ_coeff), dim=1).abs().mean(),
-        # "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
-        # "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
-
-
         "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=1).abs().mean(),
         "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
         "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(gt_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
-
-
         "occupied_orbital_energy_mae (pred-gt)": np.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (pred-calc)": np.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (gt-calc)": np.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean(),
-
-        # "occupied_orbital_energy_mae (pred-gt)": torch.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean().item(),
-        # "occupied_orbital_energy_mae (pred-calc)": torch.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean().item(),
-        # "occupied_orbital_energy_mae (gt-calc)": torch.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean().item(),
-
         "overlap_diff (gt-calc)": np.abs(gt_overlap - calc_overlap).mean(),
     }
-    # unit of pyscf calculation
-    # distance in bohr
-    # energy in hartree
-    # forces in hartree/bohr
-    # hamiltonian in hartree
-    """
-    except Exception as e:
-        print(f"Error processing molecule {data_index}: {str(e)}")
-        result = {
-            "error_count": data_index,
-        }
-    """
-    total_time = time.time() - molecule_start_time
-    print(f"[Process {os.getpid()}] Molecule {data_index}: COMPLETED in {total_time:.2f}s total", flush=True)
-    return result
 
+    total_time = time.time() - molecule_start_time
+    print(f"[GPU {gpu_id}] Molecule {data_index}: COMPLETED in {total_time:.2f}s total", flush=True)
+    return result
 
 
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="GPU-batched MD17 evaluation")
     parser.add_argument("--dir_path", type=str, default="/nas/seongjun/sphnet/aspirin/output_dump_batch")
     parser.add_argument("--pred_prefix", type=str, default="pred_")
     parser.add_argument("--gt_prefix", type=str, default="gt_")
-    parser.add_argument("--num_procs", type=int, default=1)
+    parser.add_argument("--batch_size", type=int, default=8, help="Number of molecules to process in parallel (recommended: num_gpus)")
     parser.add_argument("--debug", default=False, action="store_true")
-    parser.add_argument("--size_limit", type=int, default=1)
-    parser.add_argument("--use_gpu", default=False, action="store_true", help="Enable GPU acceleration with GPU4PySCF")
+    parser.add_argument("--size_limit", type=int, default=0)
     args = parser.parse_args()
+
+    print(f"GPU Available: {GPU_AVAILABLE}")
+    print(f"Number of GPUs: {NUM_GPUS}")
+
+    if not GPU_AVAILABLE:
+        print("ERROR: No GPU available. Use md17_evaluation_customv2.py with --use_gpu for single GPU.")
+        sys.exit(1)
 
     dir_path = args.dir_path
     pred_prefix = args.pred_prefix
     list_pred_paths = glob.glob(os.path.join(dir_path, f"{pred_prefix}*.pt"))
-    # sort by file name
     list_pred_paths.sort()
 
     gt_prefix = args.gt_prefix
     list_gt_paths = glob.glob(os.path.join(dir_path, f"{gt_prefix}*.pt"))
-    # sort by file name
     list_gt_paths.sort()
 
-    # apply multiprocessing to process list_pred_paths and list_gt_paths
-    num_procs = args.num_procs
-    # Create list of (pred_path, gt_path) tuples
     file_pairs = list(zip(list_pred_paths, list_gt_paths))
-    
+
+    if args.debug:
+        args.size_limit = args.batch_size
     if args.size_limit > 0:
         file_pairs = file_pairs[:args.size_limit]
 
-    if args.use_gpu and num_procs > 1:
-        print("Warning: GPU mode works best with --num_procs=1. Multiple processes may compete for GPU resources.")
-        print(f"Processing {len(file_pairs)} molecules with GPU and {num_procs} processes...")
-    else:
-        print(f"Processing {len(file_pairs)} molecules with {num_procs} processes...")
+    batch_size = min(args.batch_size, NUM_GPUS) if NUM_GPUS > 0 else 1
 
-    if  num_procs == 1:
-        iter_bar = tqdm(file_pairs, desc="Processing molecules")
-        results = [process_single_molecule(pred_path, gt_path, debug=args.debug, use_gpu=args.use_gpu) for pred_path, gt_path in iter_bar]
-    else:
-        # Process with multiprocessing
-        # Note: For GPU mode, create a wrapper to pass use_gpu flag
-        from functools import partial
-        process_func = partial(process_single_molecule, debug=args.debug, use_gpu=args.use_gpu)
-        with Pool(processes=num_procs) as pool:
-            results = list(tqdm(
-                pool.starmap(process_func, file_pairs),
-            total=len(file_pairs),
-            desc="Processing molecules"
-        ))
+    print(f"\n{'='*80}")
+    print(f"GPU-Batched Evaluation Configuration")
+    print(f"{'='*80}")
+    print(f"Total molecules: {len(file_pairs)}")
+    print(f"Batch size: {batch_size} (parallel molecules)")
+    print(f"GPUs used: {batch_size if NUM_GPUS > 0 else 1}")
+    print(f"{'='*80}\n")
 
-    print(f"\nCompleted processing {len(results)} molecules")
+    # Process in batches using ThreadPoolExecutor
+    # Each thread handles one molecule on a specific GPU
+    results = []
+    total_start = time.time()
 
-    # Convert keys to list and remove non-numeric keys
+    with ThreadPoolExecutor(max_workers=batch_size) as executor:
+        futures = []
+        pbar = tqdm(total=len(file_pairs), desc="Processing molecules")
+
+        for idx, (pred_path, gt_path) in enumerate(file_pairs):
+            gpu_id = idx % NUM_GPUS if NUM_GPUS > 1 else 0
+            future = executor.submit(
+                process_single_molecule_gpu,
+                pred_path,
+                gt_path,
+                gpu_id,
+                debug=args.debug
+            )
+            futures.append(future)
+
+            # Process completed futures
+            if len(futures) >= batch_size or idx == len(file_pairs) - 1:
+                for future in as_completed(futures):
+                    try:
+                        result = future.result()
+                        results.append(result)
+                        pbar.update(1)
+                    except Exception as e:
+                        print(f"Error processing molecule: {e}")
+                futures = []
+
+        pbar.close()
+
+    total_time = time.time() - total_start
+    print(f"\nCompleted processing {len(results)} molecules in {total_time:.2f}s")
+    print(f"Average time per molecule: {total_time/len(results):.2f}s")
+
+    # Aggregate results
     keys = list(results[0].keys())
-    keys_to_remove = ["data_index", "pred_force", "gt_force", "calc_force", "pred_force_norm", "gt_force_norm", "calc_force_norm"]
+    keys_to_remove = ["data_index", "pred_force", "gt_force", "calc_force",
+                      "pred_force_norm", "gt_force_norm", "calc_force_norm"]
     keys = [k for k in keys if k not in keys_to_remove]
     keys.append("error_count")
 
@@ -333,8 +360,7 @@ if __name__ == "__main__":
         else:
             evaluation_result[key] = float(np.mean(evaluation_result[key]))
 
-
-    # Print evaluation results
+    # Print results
     print("\n" + "="*80)
     print("EVALUATION RESULTS")
     print("="*80)
@@ -342,10 +368,9 @@ if __name__ == "__main__":
         print(f"{key}: {value}")
     print("="*80)
 
-    dir_dir_path = os.path.dirname(dir_path)
     dataset_name = dir_path.split("/")[-2]
-    # Save evaluation results
-    output_file = os.path.join("./outputs", f"{dataset_name}_evaluation_results.json")
+    output_file = os.path.join("./outputs", f"{dataset_name}_gpu_batch_evaluation_results.json")
+    os.makedirs("./outputs", exist_ok=True)
     with open(output_file, "w") as f:
         json.dump(evaluation_result, f, indent=4)
     print(f"\nEvaluation results saved to: {output_file}")

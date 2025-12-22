@@ -32,18 +32,18 @@ meV_ANG_2_HA_BOHR    = 1.0 / HA_BOHR_2_meV_ANG     # meV/Angstrom to Hartree/Boh
 HA_BOHR_2_HA_ANG     = 1.0 / BOHR2ANG              # Hartree/Bohr to Hartree/Angstrom
 HA_ANG_2_HA_BOHR     = 1.0 / ANG2BOHR              # Hartree/Angstrom to Hartree/Bohr
 
-def init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp"):
+def init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp", use_gpu=False):
     """
     Initialize PySCF Molecule object.
-    
+
     Args:
         atoms (list): List of atomic numbers
         pos (array): Atomic positions in angstrom
         pos_factor (float): Position scaling factor (default: 1.0)
         xc (str): Exchange-correlation functional (default: "pbe")
         basis (str): Basis set name (default: "def2svp")
-        gpu (bool): Whether to use GPU acceleration (default: False)
-        
+        use_gpu (bool): Whether to use GPU acceleration (default: False)
+
     Returns:
         pyscf.dft.RKS: PySCF RKS object
     """
@@ -53,29 +53,39 @@ def init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp"):
         pos_factor = BOHR2ANG
     else:
         raise ValueError(f"Invalid unit: {unit}")
-    return init_pyscf_mf_(atoms, pos, pos_factor=pos_factor, xc=xc, basis=basis)
+    return init_pyscf_mf_(atoms, pos, pos_factor=pos_factor, xc=xc, basis=basis, use_gpu=use_gpu)
 
-def init_pyscf_mf_(atoms, pos, pos_factor=1.0, xc="pbe", basis="def2svp"):
+def init_pyscf_mf_(atoms, pos, pos_factor=1.0, xc="pbe", basis="def2svp", use_gpu=False):
     """
     Initialize PySCF Molecule object.
-    
+
     Args:
         atoms (list): List of atomic numbers
         pos (array): Atomic positions in angstrom
         pos_factor (float): Position scaling factor (default: 1.0)
         xc (str): Exchange-correlation functional (default: "pbe")
         basis (str): Basis set name (default: "def2svp")
-        gpu (bool): Whether to use GPU acceleration (default: False)
-        
+        use_gpu (bool): Whether to use GPU acceleration (default: False)
+
     Returns:
-        pyscf.dft.RKS: PySCF RKS object
+        pyscf.dft.RKS: PySCF RKS object (CPU or GPU version)
     """
     mol = init_pyscf_mol_(atoms, pos, pos_factor, basis)
-    mf = dft.RKS(mol)
-    
+
+    if use_gpu:
+        try:
+            from gpu4pyscf import dft as gpu_dft
+            mf = gpu_dft.RKS(mol).density_fit()
+            mf.verbose = 0  # Reduce GPU verbosity
+        except ImportError:
+            print("Warning: gpu4pyscf not installed, falling back to CPU")
+            mf = dft.RKS(mol)
+    else:
+        mf = dft.RKS(mol)
+
     mf.xc = xc
     mf.basis = basis
-    
+
     return mf
 
 def init_pyscf_mol_(atoms, pos, pos_factor=1.0, basis="def2svp"):
