@@ -19,7 +19,7 @@ GPU4PySCF has been installed in the `sphnet_gpueval` environment:
 Process multiple molecules in parallel across GPUs:
 
 ```bash
-/data/miniconda3/envs/sphnet_gpueval/bin/python md17_evaluation_gpu_batch.py \
+python md17_evaluation_gpu_batch.py \
     --dir_path /path/to/data \
     --size_limit 100 \
     --batch_size 8  # Use 8 parallel molecules (one per GPU)
@@ -39,7 +39,7 @@ export CUDA_HOME=/usr/local/cuda-12.6
 export CUDA_PATH=/usr/local/cuda-12.6
 
 # Run with GPU
-/data/miniconda3/envs/sphnet_gpueval/bin/python md17_evaluation_customv2.py \
+python md17_evaluation_customv2.py \
     --dir_path /path/to/data \
     --size_limit 10 \
     --use_gpu \
@@ -189,13 +189,13 @@ Test GPU acceleration with the provided test scripts:
 
 ```bash
 # Simple water molecule test
-/data/miniconda3/envs/sphnet_gpueval/bin/python test_gpu_simple.py
+python test_gpu_simple.py
 
 # Larger molecule test (aspirin)
-/data/miniconda3/envs/sphnet_gpueval/bin/python test_gpu_larger_molecule.py
+python test_gpu_larger_molecule.py
 
 # Performance comparison
-/data/miniconda3/envs/sphnet_gpueval/bin/python test_gpu_acceleration.py
+python test_gpu_acceleration.py
 ```
 
 ## References
