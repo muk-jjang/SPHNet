@@ -104,7 +104,31 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_data["mo_occ"] = mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing calc forces with MO...", flush=True)
         force_start = time.time()
-        calc_forces = -grad_frame.kernel(mo_energy=calc_mo_energy, mo_coeff=calc_mo_coeff, mo_occ=mo_occ)
+        # For GPU mode, convert mo_coeff, mo_energy, and mo_occ to cupy arrays and temporarily set in calc_mf
+        if use_gpu >= 0:
+            import cupy as cp
+            # Save original values
+            original_mo_coeff = getattr(calc_mf, 'mo_coeff', None)
+            original_mo_energy = getattr(calc_mf, 'mo_energy', None)
+            original_mo_occ = getattr(calc_mf, 'mo_occ', None)
+            # Convert to cupy arrays
+            calc_mo_coeff_cp = cp.asarray(calc_mo_coeff, dtype=cp.float64)
+            calc_mo_energy_cp = cp.asarray(calc_mo_energy, dtype=cp.float64)
+            calc_mo_occ_cp = cp.asarray(mo_occ, dtype=cp.float64)
+            # Set temporarily
+            calc_mf.mo_coeff = calc_mo_coeff_cp
+            calc_mf.mo_energy = calc_mo_energy_cp
+            calc_mf.mo_occ = calc_mo_occ_cp
+            calc_forces = -grad_frame.kernel(mo_energy=calc_mo_energy_cp, mo_coeff=calc_mo_coeff_cp, mo_occ=calc_mo_occ_cp)
+            # Restore original values
+            if original_mo_coeff is not None:
+                calc_mf.mo_coeff = original_mo_coeff
+            if original_mo_energy is not None:
+                calc_mf.mo_energy = original_mo_energy
+            if original_mo_occ is not None:
+                calc_mf.mo_occ = original_mo_occ
+        else:
+            calc_forces = -grad_frame.kernel(mo_energy=calc_mo_energy, mo_coeff=calc_mo_coeff, mo_occ=mo_occ)
         print(f"[Process {os.getpid()}] Molecule {data_index}: Calc forces completed in {time.time() - force_start:.2f}s", flush=True)
         calc_data["calc_forces"] = calc_forces
 
@@ -182,13 +206,39 @@ def process_single_molecule(pred_file_path, gt_file_path,
         pred_data["mo_occ"] = pred_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing pred forces...", flush=True)
         force_start = time.time()
-        # Convert to NumPy on CPU; handle both NumPy and CuPy arrays
-
-        pred_forces = -grad_frame.kernel(
-            mo_energy=pred_mo_energy,
-            mo_coeff=-pred_mo_coeff,
-            mo_occ=pred_mo_occ,
-        )
+        # For GPU mode, convert mo_coeff, mo_energy, and mo_occ to cupy arrays and temporarily set in calc_mf
+        if use_gpu >= 0:
+            import cupy as cp
+            # Save original values
+            original_mo_coeff = getattr(calc_mf, 'mo_coeff', None)
+            original_mo_energy = getattr(calc_mf, 'mo_energy', None)
+            original_mo_occ = getattr(calc_mf, 'mo_occ', None)
+            # Convert to cupy arrays
+            pred_mo_coeff_cp = cp.asarray(pred_mo_coeff, dtype=cp.float64)
+            pred_mo_energy_cp = cp.asarray(pred_mo_energy, dtype=cp.float64)
+            pred_mo_occ_cp = cp.asarray(pred_mo_occ, dtype=cp.float64)
+            # Set temporarily
+            calc_mf.mo_coeff = pred_mo_coeff_cp
+            calc_mf.mo_energy = pred_mo_energy_cp
+            calc_mf.mo_occ = pred_mo_occ_cp
+            pred_forces = -grad_frame.kernel(
+                mo_energy=pred_mo_energy_cp,
+                mo_coeff=-pred_mo_coeff_cp,
+                mo_occ=pred_mo_occ_cp,
+            )
+            # Restore original values
+            if original_mo_coeff is not None:
+                calc_mf.mo_coeff = original_mo_coeff
+            if original_mo_energy is not None:
+                calc_mf.mo_energy = original_mo_energy
+            if original_mo_occ is not None:
+                calc_mf.mo_occ = original_mo_occ
+        else:
+            pred_forces = -grad_frame.kernel(
+                mo_energy=pred_mo_energy,
+                mo_coeff=-pred_mo_coeff,
+                mo_occ=pred_mo_occ,
+            )
         print(f"[Process {os.getpid()}] Molecule {data_index}: Pred forces completed in {time.time() - force_start:.2f}s", flush=True)
         pred_data["calc_forces"] = pred_forces
 
@@ -196,12 +246,39 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_data["mo_occ"] = gt_mo_occ
         print(f"[Process {os.getpid()}] Molecule {data_index}: Computing gt forces...", flush=True)
         force_start = time.time()
-
-        gt_forces = -grad_frame.kernel(
-            mo_energy=gt_mo_energy,
-            mo_coeff=-gt_mo_coeff,
-            mo_occ=gt_mo_occ,
-        )
+        # For GPU mode, convert mo_coeff, mo_energy, and mo_occ to cupy arrays and temporarily set in calc_mf
+        if use_gpu >= 0:
+            import cupy as cp
+            # Save original values
+            original_mo_coeff = getattr(calc_mf, 'mo_coeff', None)
+            original_mo_energy = getattr(calc_mf, 'mo_energy', None)
+            original_mo_occ = getattr(calc_mf, 'mo_occ', None)
+            # Convert to cupy arrays
+            gt_mo_coeff_cp = cp.asarray(gt_mo_coeff, dtype=cp.float64)
+            gt_mo_energy_cp = cp.asarray(gt_mo_energy, dtype=cp.float64)
+            gt_mo_occ_cp = cp.asarray(gt_mo_occ, dtype=cp.float64)
+            # Set temporarily
+            calc_mf.mo_coeff = gt_mo_coeff_cp
+            calc_mf.mo_energy = gt_mo_energy_cp
+            calc_mf.mo_occ = gt_mo_occ_cp
+            gt_forces = -grad_frame.kernel(
+                mo_energy=gt_mo_energy_cp,
+                mo_coeff=-gt_mo_coeff_cp,
+                mo_occ=gt_mo_occ_cp,
+            )
+            # Restore original values
+            if original_mo_coeff is not None:
+                calc_mf.mo_coeff = original_mo_coeff
+            if original_mo_energy is not None:
+                calc_mf.mo_energy = original_mo_energy
+            if original_mo_occ is not None:
+                calc_mf.mo_occ = original_mo_occ
+        else:
+            gt_forces = -grad_frame.kernel(
+                mo_energy=gt_mo_energy,
+                mo_coeff=-gt_mo_coeff,
+                mo_occ=gt_mo_occ,
+            )
         print(f"[Process {os.getpid()}] Molecule {data_index}: GT forces completed in {time.time() - force_start:.2f}s", flush=True)
         gt_data["calc_forces"] = gt_forces
 
