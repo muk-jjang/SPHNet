@@ -10,7 +10,7 @@ export PATH=/usr/local/cuda-12.6/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda-12.6/lib64:$LD_LIBRARY_PATH
 
 # Run evaluation with GPU
-/data/miniconda3/envs/sphnet_gpueval/bin/python md17_evaluation_customv2.py \
+python md17_evaluation_customv2.py \
     --use_gpu \
     --num_procs 1 \
     "$@"
