@@ -168,3 +168,5 @@ data/*
 outputs/
 
 index/*
+
+timer.dat
