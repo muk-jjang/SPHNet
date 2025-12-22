@@ -89,9 +89,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
         print(f"[Process {os.getpid()}] Molecule {data_index}: Calc forces completed in {time.time() - force_start:.2f}s", flush=True)
         calc_data["calc_forces"] = calc_forces
 
-        # save calc_data
-        # if not debug:
-        #     torch.save(calc_data, calc_path)
+        #save calc_data
+        if not debug:
+            torch.save(calc_data, calc_path)
     
     if "remove_init" not in gt_data.keys():
         remove_init = True
@@ -112,8 +112,6 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_mo_coeff = gt_data["calc_mo_coeff"]
     else:
         gt_overlap = gt_data["overlap"]
-        # print(f'calc_overlap.shape: {calc_overlap.shape}')
-        # print(f'gt_overlap.shape: {gt_overlap.shape}')
         gt_overlap = torch.from_numpy(gt_overlap).reshape(calc_overlap.shape)
         gt_overlap = matrix_transform_single(gt_overlap, atoms, convention="back2pyscf")
 
@@ -167,9 +165,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
         print(f"[Process {os.getpid()}] Molecule {data_index}: GT forces completed in {time.time() - force_start:.2f}s", flush=True)
         gt_data["calc_forces"] = gt_forces
 
-        # if not debug:
-        #     torch.save(pred_data, pred_file_path)
-        #     torch.save(gt_data, gt_file_path)
+        if not debug:
+            torch.save(pred_data, pred_file_path)
+            torch.save(gt_data, gt_file_path)
 
     pred_forces_norm = np.linalg.norm(pred_forces, axis=1)
     calc_forces_norm = np.linalg.norm(calc_forces, axis=1)
@@ -263,7 +261,7 @@ if __name__ == "__main__":
     parser.add_argument("--gt_prefix", type=str, default="gt_")
     parser.add_argument("--num_procs", type=int, default=1)
     parser.add_argument("--debug", default=False, action="store_true")
-    parser.add_argument("--size_limit", type=int, default=1)
+    parser.add_argument("--size_limit", type=int, default=-1)
     args = parser.parse_args()
 
     dir_path = args.dir_path
