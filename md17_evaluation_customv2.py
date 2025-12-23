@@ -48,7 +48,7 @@ def _ensure_numpy_float64(array):
     return np.asarray(array, dtype=np.float64)
 
 def process_single_molecule(pred_file_path, gt_file_path,
-    unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1,
+    unit="ang", xc="pbe", basis="def2svp", save_data=True, use_gpu=-1,
     DO_NEW_CALC=False
 ):
     # For multi-GPU mode, set CUDA_VISIBLE_DEVICES for this process
@@ -140,7 +140,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_data["calc_forces"] = calc_forces
 
         # save calc_data
-        if not debug:
+        if save_data:
             torch.save(calc_data, calc_path)
     
     if "remove_init" not in gt_data.keys():
@@ -219,7 +219,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
         print(f"[Process {os.getpid()}] Molecule {data_index}: GT forces completed in {time.time() - force_start:.2f}s", flush=True)
         gt_data["calc_forces"] = gt_forces
 
-        if not debug:
+        if save_data:
             torch.save(pred_data, pred_file_path)
             torch.save(gt_data, gt_file_path)
 
@@ -379,6 +379,9 @@ Examples:
     # Create list of (pred_path, gt_path) tuples
     file_pairs = list(zip(list_pred_paths, list_gt_paths))
 
+    if args.debug:
+        save_data = False
+        size_limit = 100 if args.size_limit < 0 else args.size_limit
     if args.size_limit > 0:
         file_pairs = file_pairs[:args.size_limit]
 
@@ -401,7 +404,7 @@ Examples:
         # Use multiprocessing with spawn context for proper GPU isolation
         from functools import partial
         from multiprocessing import get_context
-        process_func = partial(process_single_molecule, debug=args.debug, DO_NEW_CALC=args.do_new_calc)
+        process_func = partial(process_single_molecule, save_data=save_data, DO_NEW_CALC=args.do_new_calc)
 
         with get_context('spawn').Pool(processes=num_procs) as pool:
             results = list(tqdm(
@@ -424,11 +427,11 @@ Examples:
         if num_procs == 1:
             # Single process mode
             iter_bar = tqdm(file_pairs, desc="Processing molecules")
-            results = [process_single_molecule(pred_path, gt_path, debug=args.debug, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc) for pred_path, gt_path in iter_bar]
+            results = [process_single_molecule(pred_path, gt_path, save_data=save_data, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc) for pred_path, gt_path in iter_bar]
         else:
             # Multi-process mode (same GPU or CPU)
             from functools import partial
-            process_func = partial(process_single_molecule, debug=args.debug, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc)
+            process_func = partial(process_single_molecule, save_data=save_data, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc)
             with Pool(processes=num_procs) as pool:
                 results = list(tqdm(
                     pool.starmap(process_func, file_pairs),

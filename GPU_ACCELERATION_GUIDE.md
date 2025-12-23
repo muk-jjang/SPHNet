@@ -65,7 +65,7 @@ python md17_evaluation_customv2.py \
   - For CPU/single GPU: Can be any value
 - `--dir_path`: Directory containing pred_*.pt and gt_*.pt files
 - `--size_limit`: Limit number of molecules to process (-1 = all)
-- `--debug`: Debug mode (sets size_limit=1)
+- `--debug`: Debug mode (sets size_limit, does not save data)
 - `--do_new_calc`: Force recalculation even if calc_*.pt files exist
 - `--pred_prefix`: Prefix for prediction files (default: "pred_")
 - `--gt_prefix`: Prefix for ground truth files (default: "gt_")
