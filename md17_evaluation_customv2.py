@@ -51,6 +51,27 @@ def process_single_molecule(pred_file_path, gt_file_path,
     unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1,
     DO_NEW_CALC=False
 ):
+    # For multi-GPU mode, set CUDA_VISIBLE_DEVICES for this process
+    # This ensures proper GPU isolation when using multiprocessing
+    if use_gpu >= 0:
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(use_gpu)
+
+        # Validate GPU assignment
+        try:
+            import torch.cuda as cuda
+            if cuda.is_available():
+                # After setting CUDA_VISIBLE_DEVICES, GPU 0 in this process = the assigned physical GPU
+                actual_gpu = cuda.current_device()
+                gpu_name = cuda.get_device_name(actual_gpu)
+                print(f"[Process {os.getpid()}] GPU validation: Using physical GPU {use_gpu} (local device {actual_gpu}: {gpu_name})", flush=True)
+            else:
+                print(f"[Process {os.getpid()}] Warning: GPU {use_gpu} requested but CUDA not available, falling back to CPU", flush=True)
+                use_gpu = -1
+        except Exception as e:
+            print(f"[Process {os.getpid()}] Warning: GPU validation failed: {e}, falling back to CPU", flush=True)
+            use_gpu = -1
+
+
     dir_path = os.path.dirname(pred_file_path)
     calc_path = pred_file_path.replace("pred_", "calc_")
 
@@ -288,22 +309,61 @@ def process_single_molecule(pred_file_path, gt_file_path,
 if __name__ == "__main__":
     import argparse
 
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="MD17 Evaluation with optional GPU acceleration",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # CPU mode with 4 processes
+  python md17_evaluation_customv2.py --num_procs 4
+
+  # Single GPU mode
+  python md17_evaluation_customv2.py --use_gpu 0
+
+  # Multi-GPU mode: Use GPUs 0,1,2,3 (requires num_procs=4, one process per GPU)
+  python md17_evaluation_customv2.py --use_gpu 0,1,2,3 --num_procs 4
+        """
+    )
     parser.add_argument("--dir_path", type=str, default="/nas/seongjun/sphnet/aspirin/output_dump_batch")
     parser.add_argument("--pred_prefix", type=str, default="pred_")
     parser.add_argument("--gt_prefix", type=str, default="gt_")
-    parser.add_argument("--num_procs", type=int, default=1)
+    parser.add_argument("--num_procs", type=int, default=1,
+                       help="Number of processes. For multi-GPU, must equal number of GPUs")
     parser.add_argument("--debug", default=False, action="store_true")
     parser.add_argument("--size_limit", type=int, default=-1)
-    parser.add_argument("--use_gpu", type=int, default=-1, help="GPU device ID to use (-1 for CPU, 0-7 for specific GPU)")
+    parser.add_argument("--use_gpu", type=str, default=None,
+                       help="GPU config: None/-1 for CPU, single ID (e.g., '0'), or comma-separated for multi-GPU (e.g., '0,1,2,3')")
     parser.add_argument("--do_new_calc", default=False, action="store_true")
     args = parser.parse_args()
 
-    # CRITICAL: Set CUDA_VISIBLE_DEVICES immediately after parsing arguments
-    # This must happen before ANY GPU library operations (gpu4pyscf, cupy, etc.)
-    if args.use_gpu >= 0:
-        os.environ['CUDA_VISIBLE_DEVICES'] = str(args.use_gpu)
-        print(f"Setting CUDA_VISIBLE_DEVICES={args.use_gpu} before GPU initialization")
+    # Parse GPU configuration
+    if args.use_gpu is None or args.use_gpu == "-1":
+        # CPU mode
+        multi_gpu_mode = False
+        gpu_ids = [-1]
+        print("CPU mode")
+    elif ',' in args.use_gpu:
+        # Multi-GPU mode
+        gpu_ids = [int(x.strip()) for x in args.use_gpu.split(',')]
+        multi_gpu_mode = True
+        num_gpus = len(gpu_ids)
+
+        # In multi-GPU mode, num_procs must equal num_gpus (one process per GPU)
+        assert args.num_procs == num_gpus, \
+            f"Multi-GPU mode requires num_procs ({args.num_procs}) == num_gpus ({num_gpus}). " \
+            f"Each process runs on a dedicated GPU."
+
+        print(f"Multi-GPU mode: Using {num_gpus} GPUs {gpu_ids} with {args.num_procs} processes (1 GPU per process)")
+    else:
+        # Single GPU mode
+        single_gpu_id = int(args.use_gpu)
+        gpu_ids = [single_gpu_id]
+        multi_gpu_mode = False
+
+        # CRITICAL: Set CUDA_VISIBLE_DEVICES for single GPU mode
+        # This must happen before ANY GPU library operations
+        os.environ['CUDA_VISIBLE_DEVICES'] = str(single_gpu_id)
+        print(f"Single GPU mode: Using GPU {single_gpu_id}")
 
     dir_path = args.dir_path
     pred_prefix = args.pred_prefix
@@ -316,36 +376,65 @@ if __name__ == "__main__":
     # sort by file name
     list_gt_paths.sort()
 
-    # apply multiprocessing to process list_pred_paths and list_gt_paths
-    num_procs = args.num_procs
     # Create list of (pred_path, gt_path) tuples
     file_pairs = list(zip(list_pred_paths, list_gt_paths))
-    
+
     if args.size_limit > 0:
         file_pairs = file_pairs[:args.size_limit]
 
-    if args.use_gpu >= 0:
-        print(f"GPU mode enabled: Using GPU {args.use_gpu}")
-        if num_procs > 1:
-            print("Warning: GPU mode works best with --num_procs=1. Multiple processes may compete for GPU resources.")
-        print(f"Processing {len(file_pairs)} molecules with GPU {args.use_gpu} and {num_procs} processes...")
-    else:
-        print(f"Processing {len(file_pairs)} molecules with CPU and {num_procs} processes...")
+    num_procs = args.num_procs
 
-    if  num_procs == 1:
-        iter_bar = tqdm(file_pairs, desc="Processing molecules")
-        results = [process_single_molecule(pred_path, gt_path, debug=args.debug, use_gpu=args.use_gpu, DO_NEW_CALC=args.do_new_calc) for pred_path, gt_path in iter_bar]
-    else:
-        # Process with multiprocessing
-        # Note: For GPU mode, create a wrapper to pass use_gpu flag
+    # Configure processing based on GPU mode
+    if multi_gpu_mode:
+        # Multi-GPU mode: Assign each GPU to molecules in round-robin fashion
+        # Create (pred_path, gt_path, gpu_id) tuples
+        file_pairs_with_gpu = []
+        for idx, (pred_path, gt_path) in enumerate(file_pairs):
+            gpu_id = gpu_ids[idx % num_gpus]
+            file_pairs_with_gpu.append((pred_path, gt_path, gpu_id))
+
+        print(f"\n{'='*80}")
+        print(f"Processing {len(file_pairs)} molecules across {num_gpus} GPUs")
+        print(f"Distribution: Round-robin across GPUs {gpu_ids}")
+        print(f"{'='*80}\n")
+
+        # Use multiprocessing with spawn context for proper GPU isolation
         from functools import partial
-        process_func = partial(process_single_molecule, debug=args.debug, use_gpu=args.use_gpu, DO_NEW_CALC=args.do_new_calc)
-        with Pool(processes=num_procs) as pool:
+        from multiprocessing import get_context
+        process_func = partial(process_single_molecule, debug=args.debug, DO_NEW_CALC=args.do_new_calc)
+
+        with get_context('spawn').Pool(processes=num_procs) as pool:
             results = list(tqdm(
-                pool.starmap(process_func, file_pairs),
-            total=len(file_pairs),
-            desc="Processing molecules"
-        ))
+                pool.starmap(process_func, file_pairs_with_gpu),
+                total=len(file_pairs_with_gpu),
+                desc="Processing molecules"
+            ))
+    else:
+        # Single GPU or CPU mode
+        single_gpu_id = gpu_ids[0]
+
+        print(f"\n{'='*80}")
+        print(f"Processing {len(file_pairs)} molecules")
+        print(f"Mode: {'GPU ' + str(single_gpu_id) if single_gpu_id >= 0 else 'CPU'}")
+        print(f"Processes: {num_procs}")
+        if single_gpu_id >= 0 and num_procs > 1:
+            print(f"Note: {num_procs} processes will share GPU {single_gpu_id}")
+        print(f"{'='*80}\n")
+
+        if num_procs == 1:
+            # Single process mode
+            iter_bar = tqdm(file_pairs, desc="Processing molecules")
+            results = [process_single_molecule(pred_path, gt_path, debug=args.debug, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc) for pred_path, gt_path in iter_bar]
+        else:
+            # Multi-process mode (same GPU or CPU)
+            from functools import partial
+            process_func = partial(process_single_molecule, debug=args.debug, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc)
+            with Pool(processes=num_procs) as pool:
+                results = list(tqdm(
+                    pool.starmap(process_func, file_pairs),
+                    total=len(file_pairs),
+                    desc="Processing molecules"
+                ))
 
     print(f"\nCompleted processing {len(results)} molecules")
 
