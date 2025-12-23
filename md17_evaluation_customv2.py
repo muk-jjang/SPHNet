@@ -258,10 +258,18 @@ def process_single_molecule(pred_file_path, gt_file_path,
     
     pred_mo_coeff = pred_data["calc_mo_coeff"]
     pred_mo_occ_coeff = pred_mo_coeff[:, :num_occ]
+    # convert to torch tensor
+    pred_mo_occ_coeff = torch.tensor(pred_mo_occ_coeff, dtype=torch.float64)
+    
     gt_mo_coeff = gt_data["calc_mo_coeff"]
     gt_mo_occ_coeff = gt_mo_coeff[:, :num_occ]
+    # convert to torch tensor
+    gt_mo_occ_coeff = torch.tensor(gt_mo_occ_coeff, dtype=torch.float64)
+    
     calc_mo_coeff = calc_data["calc_mo_coeff"]
     calc_mo_occ_coeff = calc_mo_coeff[:, :num_occ]
+    # convert to torch tensor
+    calc_mo_occ_coeff = torch.tensor(calc_mo_occ_coeff, dtype=torch.float64)
 
     result = {
         "data_index": data_index,
