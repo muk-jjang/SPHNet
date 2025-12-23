@@ -39,13 +39,35 @@ def _ensure_numpy_float64(array):
     This ensures compatibility with PySCF gradient calculations.
     """
     # Handle CuPy arrays (from GPU calculations)
+    # Check both by attribute and by type name to be safe
     if hasattr(array, 'get'):
+        # CuPy array - convert to NumPy
+        array = array.get()
+    elif type(array).__module__.startswith('cupy'):
+        # Another way to detect CuPy arrays
         array = array.get()
     # Handle PyTorch tensors
     elif hasattr(array, 'cpu'):
         array = array.cpu().numpy()
-    # Convert to NumPy float64
-    return np.asarray(array, dtype=np.float64)
+    # Handle NumPy arrays
+    elif isinstance(array, np.ndarray):
+        pass
+    # Handle lists or other sequences
+    else:
+        try:
+            array = np.array(array)
+        except Exception as e:
+            raise ValueError(f"Cannot convert {type(array)} to NumPy array: {e}")
+
+    # Ensure it's a NumPy array with float64 dtype
+    # Use copy=False to avoid unnecessary copying when already correct type
+    result = np.asarray(array, dtype=np.float64)
+
+    # Verify the result doesn't have object dtype
+    if result.dtype == np.object_:
+        raise ValueError(f"Failed to convert array to float64, got dtype=object. Original array type: {type(array)}, shape: {getattr(array, 'shape', 'N/A')}")
+
+    return result
 
 def process_single_molecule(pred_file_path, gt_file_path,
     unit="ang", xc="pbe", basis="def2svp", save_data=True, use_gpu=-1,
@@ -150,7 +172,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
     else:
         remove_init = gt_data["remove_init"]
 
-    if "calc_force" in pred_data and "calc_force" in gt_data and not DO_NEW_CALC:
+    if "calc_forces" in pred_data and "calc_forces" in gt_data and not DO_NEW_CALC:
         pred_energy = pred_data["calc_energy"]
         pred_forces = pred_data["calc_forces"]
         pred_mo_energy = pred_data["calc_mo_energy"]
@@ -233,9 +255,13 @@ def process_single_molecule(pred_file_path, gt_file_path,
     pred_mo_energy_occ = pred_mo_energy[:num_occ]
     gt_mo_energy_occ = gt_mo_energy[:num_occ]
     calc_mo_energy_occ = calc_mo_energy[:num_occ]
-    pred_mo_occ_coeff = pred_res["sliced_orbital_coefficients"]
-    gt_mo_occ_coeff = gt_res["sliced_orbital_coefficients"]
-    calc_mo_occ_coeff = calc_res["sliced_orbital_coefficients"]
+    
+    pred_mo_coeff = pred_data["calc_mo_coeff"]
+    pred_mo_occ_coeff = pred_mo_coeff[:, :num_occ]
+    gt_mo_coeff = gt_data["calc_mo_coeff"]
+    gt_mo_occ_coeff = gt_mo_coeff[:, :num_occ]
+    calc_mo_coeff = calc_data["calc_mo_coeff"]
+    calc_mo_occ_coeff = calc_mo_coeff[:, :num_occ]
 
     result = {
         "data_index": data_index,
@@ -268,23 +294,13 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "pred_force_norm_diff (pred-calc_forces)": abs(pred_forces_norm - calc_forces_norm).mean(),
         "gt_force_norm_diff (gt-calc_forces)": abs(gt_forces_norm - calc_forces_norm).mean(),
 
-        # "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(gt_mo_occ_coeff), dim=1).abs().mean(),
-        # "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
-        # "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
-
-
-        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=1).abs().mean(),
-        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
-        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(gt_mo_occ_coeff, calc_mo_occ_coeff, dim=1).abs().mean(),
-
+        "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=0).abs().mean(),
+        "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=0).abs().mean(),
+        "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(gt_mo_occ_coeff, calc_mo_occ_coeff, dim=0).abs().mean(),
 
         "occupied_orbital_energy_mae (pred-gt)": np.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (pred-calc)": np.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (gt-calc)": np.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean(),
-
-        # "occupied_orbital_energy_mae (pred-gt)": torch.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean().item(),
-        # "occupied_orbital_energy_mae (pred-calc)": torch.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean().item(),
-        # "occupied_orbital_energy_mae (gt-calc)": torch.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean().item(),
 
         "overlap_diff (gt-calc)": np.abs(gt_overlap - calc_overlap).mean(),
     }
@@ -329,7 +345,7 @@ Examples:
     parser.add_argument("--gt_prefix", type=str, default="gt_")
     parser.add_argument("--num_procs", type=int, default=1,
                        help="Number of processes. For multi-GPU, must equal number of GPUs")
-    parser.add_argument("--debug", default=False, action="store_true")
+    parser.add_argument("--save_data", default=True)
     parser.add_argument("--size_limit", type=int, default=-1)
     parser.add_argument("--use_gpu", type=str, default=None,
                        help="GPU config: None/-1 for CPU, single ID (e.g., '0'), or comma-separated for multi-GPU (e.g., '0,1,2,3')")
@@ -356,7 +372,7 @@ Examples:
         print(f"Multi-GPU mode: Using {num_gpus} GPUs {gpu_ids} with {args.num_procs} processes (1 GPU per process)")
     else:
         # Single GPU mode
-        single_gpu_id = int(args.use_gpu)
+        single_gpu_id = int(eval(args.use_gpu))
         gpu_ids = [single_gpu_id]
         multi_gpu_mode = False
 
@@ -378,10 +394,9 @@ Examples:
 
     # Create list of (pred_path, gt_path) tuples
     file_pairs = list(zip(list_pred_paths, list_gt_paths))
+    assert len(list_pred_paths) == len(list_gt_paths), "Number of prediction files and ground truth files do not match"
+    assert len(file_pairs) > 0, "No files found"
 
-    if args.debug:
-        save_data = False
-        size_limit = 100 if args.size_limit < 0 else args.size_limit
     if args.size_limit > 0:
         file_pairs = file_pairs[:args.size_limit]
 
@@ -404,7 +419,7 @@ Examples:
         # Use multiprocessing with spawn context for proper GPU isolation
         from functools import partial
         from multiprocessing import get_context
-        process_func = partial(process_single_molecule, save_data=save_data, DO_NEW_CALC=args.do_new_calc)
+        process_func = partial(process_single_molecule, save_data=args.save_data, DO_NEW_CALC=args.do_new_calc)
 
         with get_context('spawn').Pool(processes=num_procs) as pool:
             results = list(tqdm(
@@ -427,11 +442,11 @@ Examples:
         if num_procs == 1:
             # Single process mode
             iter_bar = tqdm(file_pairs, desc="Processing molecules")
-            results = [process_single_molecule(pred_path, gt_path, save_data=save_data, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc) for pred_path, gt_path in iter_bar]
+            results = [process_single_molecule(pred_path, gt_path, save_data=args.save_data, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc) for pred_path, gt_path in iter_bar]
         else:
             # Multi-process mode (same GPU or CPU)
             from functools import partial
-            process_func = partial(process_single_molecule, save_data=save_data, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc)
+            process_func = partial(process_single_molecule, save_data=args.save_data, use_gpu=single_gpu_id, DO_NEW_CALC=args.do_new_calc)
             with Pool(processes=num_procs) as pool:
                 results = list(tqdm(
                     pool.starmap(process_func, file_pairs),
