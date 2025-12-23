@@ -12,6 +12,6 @@ export NUMEXPR_NUM_THREADS=32
 
 python md17_evaluation_customv2.py \
 --dir_path=./outputs/malondialdehyde_split_25000_500_1478_pbe0/output_dump \
---num_procs=5 \
---size_limit=50 \
+--num_procs=7 \
+--size_limit=-1 \
     

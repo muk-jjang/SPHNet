@@ -33,9 +33,9 @@ use_sparse_tp: true # whether use the sparse tensor product gate
 sparsity: 0.3 #Sparsity ratio
 num_epochs: 3000000 #Maximum number of epochs
 max_steps: 200000 #Maximum number of training steps.
-batch_size: 10
+batch_size: 5
 inference_batch_size: 1
-dataloader_num_workers: 8
+dataloader_num_workers: 4
 lr: 5e-4
 multi_para_group: false
 weight_decay: 0
@@ -64,10 +64,10 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 # dataset_path : "/data/qh9stable/data.mdb"     # if the dataset is mdb format, enter the file path
 # # dataset_path : "/data/qh9dynamic/data.mdb"
 
-data_name: md17
+data_name: escflow-uracil
 basis: "def2-svp"
 xc: 'pbe0'
-dataset_path : ./dataset2/uracil/data.lmdb/data.mdb
+dataset_path : "/ssd1/qhflow-mlff/dataset/uracil_shard/processed/lmdbs"
 
 # data_name: custom
 # basis: "def2-svp"
