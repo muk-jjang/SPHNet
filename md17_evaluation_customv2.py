@@ -126,7 +126,6 @@ def process_single_molecule(pred_file_path, gt_file_path,
     calc_mf.init_guess = "minao"
     calc_mf.small_rho_cutoff = 1e-12
 
-    DO_NEW_CALC = False
     #try:
     # Check if calculated data exists
     if os.path.exists(calc_path) and not DO_NEW_CALC:
@@ -190,16 +189,23 @@ def process_single_molecule(pred_file_path, gt_file_path,
     else:
         remove_init = gt_data["remove_init"]
 
-    if "calc_force" in pred_data and "calc_force" in gt_data and not DO_NEW_CALC:
+    if "calc_forces" in pred_data.keys() and "calc_forces" in gt_data.keys() and not DO_NEW_CALC:
         pred_energy = pred_data["calc_energy"]
         pred_forces = pred_data["calc_forces"]
         pred_mo_energy = pred_data["calc_mo_energy"]
         pred_mo_coeff = pred_data["calc_mo_coeff"]
+        pred_mo_occ = pred_data["mo_occ"]
+        pred_hamiltonian = pred_data["pred_hamiltonian"] + remove_init * gt_data["init_ham"].reshape(pred_data["pred_hamiltonian"].shape)
+        pred_ham = matrix_transform_single(pred_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
 
         gt_energy = gt_data["calc_energy"]
         gt_forces = gt_data["calc_forces"]
         gt_mo_energy = gt_data["calc_mo_energy"]
         gt_mo_coeff = gt_data["calc_mo_coeff"]
+        gt_mo_occ = gt_data["mo_occ"]
+        gt_hamiltonian = gt_data["hamiltonian"] + remove_init * gt_data["init_ham"].reshape(gt_data["hamiltonian"].shape)
+        gt_ham = matrix_transform_single(gt_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
+        gt_overlap = torch.from_numpy(gt_data["overlap"]).reshape(calc_overlap.shape)
     else:
         gt_overlap = gt_data["overlap"]
         gt_overlap = torch.from_numpy(gt_overlap).reshape(calc_overlap.shape)
@@ -313,11 +319,6 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "pred_force_norm_diff (pred-calc_forces)": abs(pred_forces_norm - calc_forces_norm).mean(),
         "gt_force_norm_diff (gt-calc_forces)": abs(gt_forces_norm - calc_forces_norm).mean(),
 
-        # "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(gt_mo_occ_coeff), dim=1).abs().mean(),
-        # "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(torch.tensor(pred_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
-        # "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(torch.tensor(gt_mo_occ_coeff), torch.tensor(calc_mo_occ_coeff), dim=1).abs().mean(),
-
-
         "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=0).abs().mean(),
         "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=0).abs().mean(),
         "orbital_coeff_similarity (gt-calc)": torch.cosine_similarity(gt_mo_occ_coeff, calc_mo_occ_coeff, dim=0).abs().mean(),
@@ -326,10 +327,6 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "occupied_orbital_energy_mae (pred-gt)": np.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (pred-calc)": np.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (gt-calc)": np.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean(),
-
-        # "occupied_orbital_energy_mae (pred-gt)": torch.abs(pred_mo_energy_occ - gt_mo_energy_occ).mean().item(),
-        # "occupied_orbital_energy_mae (pred-calc)": torch.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean().item(),
-        # "occupied_orbital_energy_mae (gt-calc)": torch.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean().item(),
 
         "overlap_diff (gt-calc)": np.abs(gt_overlap - calc_overlap).mean(),
     }
@@ -442,10 +439,10 @@ if __name__ == "__main__":
         print(f"{key}: {value}")
     print("="*80)
 
-    dir_dir_path = os.path.dirname(dir_path)
+    # dir_dir_path = os.path.dirname(dir_path)
     dataset_name = dir_path.split("/")[-2]
     # Save evaluation results
-    output_file = os.path.join(dir_dir_path, f"{dataset_name}_evaluation_results.json")
+    output_file = os.path.join('./outputs', f"{dataset_name}_evaluation_results.json")
     with open(output_file, "w") as f:
         json.dump(evaluation_result, f, indent=4)
     print(f"\nEvaluation results saved to: {output_file}")
