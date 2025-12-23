@@ -96,10 +96,6 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_data["xc"] = xc
         calc_data["basis"] = basis
         # calc_data["scf_cycles"] = calc_mf.cycles
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Computing initial forces...", flush=True)
-        force_start = time.time()
-        calc_data["forces"] = torch.tensor(-grad_frame.kernel(), dtype=torch.float64)
-        print(f"[Process {os.getpid()}] Molecule {data_index}: Initial forces completed in {time.time() - force_start:.2f}s", flush=True)
 
         calc_overlap = calc_data["overlap"].unsqueeze(0) # (gt_overlap - calc_overlap) has float32 precision error (1e^-7)
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
@@ -145,8 +141,6 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_mo_coeff = gt_data["calc_mo_coeff"]
     else:
         gt_overlap = gt_data["overlap"]
-        # print(f'calc_overlap.shape: {calc_overlap.shape}')
-        # print(f'gt_overlap.shape: {gt_overlap.shape}')
         gt_overlap = torch.from_numpy(gt_overlap).reshape(calc_overlap.shape)
         gt_overlap = matrix_transform_single(gt_overlap, atoms, convention="back2pyscf")
 
@@ -300,7 +294,7 @@ if __name__ == "__main__":
     parser.add_argument("--gt_prefix", type=str, default="gt_")
     parser.add_argument("--num_procs", type=int, default=1)
     parser.add_argument("--debug", default=False, action="store_true")
-    parser.add_argument("--size_limit", type=int, default=1)
+    parser.add_argument("--size_limit", type=int, default=-1)
     parser.add_argument("--use_gpu", type=int, default=-1, help="GPU device ID to use (-1 for CPU, 0-7 for specific GPU)")
     parser.add_argument("--do_new_calc", default=False, action="store_true")
     args = parser.parse_args()
