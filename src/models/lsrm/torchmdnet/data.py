@@ -102,14 +102,14 @@ class DataModule(LightningDataModule):
             batch_size = self.hparams["batch_size"]
             shuffle = True
         elif stage in ["val", "test"]:
-            batch_size = self.hparams["inference_batch_size"] if self.hparams["inference_batch_size"] else self.hparams["batch_size"]
+            batch_size = self.hparams["inference_batch_size"] 
             shuffle = False
 
         dl = DataLoader(
             dataset=dataset,
             batch_size=batch_size,
             shuffle=shuffle,
-            num_workers=self.hparams["num_workers"],
+            num_workers=self.hparams["dataloader_num_workers"],
             pin_memory=True,
             # pin_memory=False,
         )
