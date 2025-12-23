@@ -272,7 +272,7 @@ class LmdbDataset(Dataset):
                  remove_init = False,
                  remove_atomref_energy = False,
                  Htoblock_otf = True, ## on save H matrix, H to block is process in collate unifined for memory saving.
-                 basis = "def2-tzvp"):
+                 basis = "def2svp"):
         super(LmdbDataset, self).__init__()
         self.path = path
         self.data_name = data_name
@@ -445,7 +445,6 @@ class LmdbDataset(Dataset):
             overlap=overlap_matrix.reshape(1, h_dim, h_dim),
             orbital_energies=torch.from_numpy(orbital_energies.copy()).reshape(1, h_dim),
             orbital_coefficients=orbital_coefficients.reshape(1, h_dim, h_dim),
-            edge_index=edge_index,
             
             #energy=energy.view(1, 1),
             #AO_index=AO_index,
@@ -499,6 +498,13 @@ class LmdbDataset(Dataset):
                 data_dict = txn.get(key)
             data_dict = pickle.loads(data_dict)
             data_object = self.get_mol(data_dict, orb_energy_and_coeff=True)
+            
+            # Add edge_index and labels generation for escflow data
+            N_atom = data_object.pos.shape[0]
+            neighbor_finder = RadiusGraph(r=3)
+            data_object = neighbor_finder(data_object)
+            min_nodes_foreachGroup = 4
+            build_label(data_object, num_labels=int(N_atom/min_nodes_foreachGroup), method='kmeans')
         else:
 
             # Return features.
@@ -515,8 +521,8 @@ class LmdbDataset(Dataset):
             data_object = transform(data_object)
         out = {'pos': data_object.pos.numpy().astype(np.float32), 
             'forces': data_object.forces.numpy().astype(np.float32),
-            # 'edge_index': data_object.edge_index.numpy(), 
-            # 'labels': data_object.labels.numpy(),
+            'edge_index': data_object.edge_index.numpy(), 
+            'labels': data_object.labels.numpy(),
             'atomic_numbers': data_object.atomic_numbers.numpy(),
             'molecule_size':data_object.pos.shape[0],
             "idx":idx
@@ -625,6 +631,7 @@ class LmdbDataset(Dataset):
             .reshape(self.hamiltonian_size, self.hamiltonian_size, 24)
         )
         self.Q = Q
+
 
 
 def matrix_transform(hamiltonian, atoms, convention):
