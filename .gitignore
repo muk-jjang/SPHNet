@@ -166,7 +166,7 @@ data/*
 
 # local files
 outputs/
-
+outputs2/
 index/*
 
 timer.dat

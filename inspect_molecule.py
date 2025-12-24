@@ -20,13 +20,19 @@ import json
 import numpy as np
 import torch
 
+md17_dataset_list = ['ethanol', 'malondialdehyde', 'uracil']
+rmd17_dataset_list = ['aspirin', 'naphthalene', 'salicylic_acid']
 
 def inspect_single_file(dir_path, mol_id, verbose=True):
     """단일 분자 파일 상세 검사"""
-    
-    pred_path = os.path.join(dir_path, f"pred_{mol_id}.pt")
-    gt_path = os.path.join(dir_path, f"gt_{mol_id}.pt")
-    calc_path = os.path.join(dir_path, f"calc_{mol_id}.pt")
+    if dir_path.split("/")[-2] in md17_dataset_list:
+        pred_path = os.path.join(dir_path, f"pred_{mol_id}.pt")
+        gt_path = os.path.join(dir_path, f"gt_{mol_id}.pt")
+        calc_path = os.path.join(dir_path, f"calc_{mol_id}.pt")
+    elif dir_path.split("/")[-2] in rmd17_dataset_list:
+        pred_path = os.path.join(dir_path, f"pred_batch0_{mol_id}.pt")
+        gt_path = os.path.join(dir_path, f"gt_batch0_{mol_id}.pt")
+        calc_path = os.path.join(dir_path, f"calc_batch0_{mol_id}.pt")
     
     result = {
         "mol_id": mol_id,
@@ -208,7 +214,7 @@ def inspect_single_file(dir_path, mol_id, verbose=True):
         
         # remove_init flag
         if "remove_init" in gt_data:
-            result["gt"]["remove_init"] = gt_data["remove_init"]
+            result["gt"]["remove_init"] = bool(gt_data["remove_init"])
             if verbose:
                 print(f"  remove_init: {gt_data['remove_init']}")
     
@@ -271,9 +277,9 @@ def inspect_single_file(dir_path, mol_id, verbose=True):
             calc_nan = np.isnan(calc_e) if isinstance(calc_e, (float, int, np.floating)) else False
             
             result["comparison"]["energy_nan_status"] = {
-                "pred": pred_nan,
-                "gt": gt_nan,
-                "calc": calc_nan,
+                "pred": bool(pred_nan),
+                "gt": bool(gt_nan),
+                "calc": bool(calc_nan),
             }
             
             if not pred_nan and not gt_nan and not calc_nan:
@@ -309,7 +315,6 @@ def main():
     parser.add_argument("--mol_ids", nargs="+", type=str, help="검사할 분자 ID 목록")
     parser.add_argument("--from_json", type=str, help="이상치 목록이 저장된 JSON 파일 경로")
     parser.add_argument("--top_n", type=int, default=10, help="JSON에서 상위 N개 이상치 검사")
-    parser.add_argument("--output_json", type=str, help="결과를 저장할 JSON 파일 경로")
     args = parser.parse_args()
     
     mol_ids_to_inspect = []
@@ -348,11 +353,16 @@ def main():
         result = inspect_single_file(args.dir_path, mol_id, verbose=True)
         all_results.append(result)
     
-    # # Save results to JSON if requested
-    # if args.output_json:
-    #     with open(args.output_json, "w") as f:
-    #         json.dump(all_results, f, indent=4)
-    #     print(f"\n결과 저장됨: {args.output_json}")
+    # Save results to JSON (md17_evaluation_customv2.py 스타일)
+    # dataset_name = dir_path.split("/")[-2]
+    path_parts = [p for p in args.dir_path.rstrip('/').split('/') if p]
+    dataset_name = path_parts[-2] if len(path_parts) >= 2 else path_parts[-1] if path_parts else "unknown"
+    
+    os.makedirs('./outputs2/molecule', exist_ok=True)
+    output_file = os.path.join('./outputs2/molecule', f"{dataset_name}_{mol_ids_to_inspect[0]}_inspect_results.json")
+    with open(output_file, "w") as f:
+        json.dump(all_results, f, indent=4)
+    print(f"\n결과 저장됨: {output_file}")
     
     # Summary
     print(f"\n{'='*80}")

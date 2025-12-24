@@ -9,6 +9,7 @@ import torch
 import numpy as np
 import argparse
 import time
+import json
 from collections import defaultdict
 from tqdm import tqdm
 
@@ -271,7 +272,57 @@ def analyze_directory(dir_path, pred_prefix="pred_", gt_prefix="gt_", calc_prefi
     print(f"  - CALC: {len(type_stats['calc']['files_with_any_nan'])}/{type_stats['calc']['total_files']} 파일에서 NaN 발견 ({len(type_stats['calc']['files_with_any_nan'])/type_stats['calc']['total_files']*100 if type_stats['calc']['total_files'] > 0 else 0:.2f}%)")
     print(f"{'='*80}")
     
-    return stats, nan_file_indices, type_stats, dataset_name
+    return stats, nan_file_indices, type_stats, dataset_name, total_elapsed
+
+
+def save_results_to_json(stats, nan_file_indices, type_stats, dataset_name, elapsed_time, dir_path):
+    """분석 결과를 JSON 파일로 저장 (md17_evaluation_customv2.py 스타일)"""
+    
+    # JSON 직렬화 가능한 형태로 변환
+    json_results = {
+        "dataset_name": dataset_name,
+        "analysis_timestamp": time.strftime('%Y-%m-%d %H:%M:%S'),
+        "elapsed_time_seconds": elapsed_time,
+        "summary": {},
+        "detailed_stats": {},
+        "nan_file_indices": {}
+    }
+    
+    # 파일 타입별 요약
+    file_types = ["pred", "gt", "calc"]
+    for ft in file_types:
+        ts = type_stats[ft]
+        nan_files_count = len(ts["files_with_any_nan"])
+        total_files = ts["total_files"]
+        json_results["summary"][ft] = {
+            "nan_files_count": nan_files_count,
+            "total_files": total_files,
+            "nan_ratio_percent": nan_files_count / total_files * 100 if total_files > 0 else 0,
+            "nan_file_list": sorted(list(ts["files_with_any_nan"]))
+        }
+    
+    # 상세 통계 (stats를 직렬화 가능하게 변환)
+    for key, s in stats.items():
+        json_results["detailed_stats"][key] = {
+            "files_with_nan": s["files_with_nan"],
+            "total_files": s["total_files"],
+            "total_nan_count": s["total_nan_count"],
+            "total_element_count": s["total_element_count"],
+            "nan_ratio_percent": s["files_with_nan"] / s["total_files"] * 100 if s["total_files"] > 0 else 0
+        }
+    
+    # NaN 파일 인덱스 (리스트로 변환)
+    for key, indices in nan_file_indices.items():
+        json_results["nan_file_indices"][key] = sorted(indices)
+    
+    # md17_evaluation_customv2.py 스타일로 저장
+    # dataset_name = dir_path.split("/")[-2]
+    os.makedirs('./outputs2', exist_ok=True)
+    output_file = os.path.join('./outputs2', f"{dataset_name}_nan_analysis.json")
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(json_results, f, ensure_ascii=False, indent=4)
+    
+    print(f"\n💾 결과가 저장되었습니다: {output_file}")
 
 
 def main():
@@ -299,12 +350,15 @@ def main():
                     print(f"{key:<30} {str(result['has_nan']):<10} {result['nan_count']:<15} {result['total_count']:<15} {result['nan_ratio']:.4f}")
             print(f"\n소요 시간: {elapsed*1000:.2f}ms")
     else:
-        analyze_directory(
+        stats, nan_file_indices, type_stats, dataset_name, elapsed_time = analyze_directory(
             args.dir_path,
             pred_prefix=args.pred_prefix,
             gt_prefix=args.gt_prefix,
             calc_prefix=args.calc_prefix
         )
+        
+        # JSON 파일 저장 (md17_evaluation_customv2.py 스타일)
+        save_results_to_json(stats, nan_file_indices, type_stats, dataset_name, elapsed_time, args.dir_path)
 
 
 if __name__ == "__main__":
