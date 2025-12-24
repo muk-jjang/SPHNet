@@ -5,6 +5,10 @@ ROOT_DIR="$(dirname "$SCRIPT_DIR")"
 
 cd "$ROOT_DIR" || exit 1
 export HYDRA_FULL_ERROR=1
+export OMP_NUM_THREADS=32
+export MKL_NUM_THREADS=32
+export OPENBLAS_NUM_THREADS=32
+export NUMEXPR_NUM_THREADS=32
 
 python pipelines/train.py --config-name=ethanol.yaml \
 job_id=escflow_ethanol_new \
