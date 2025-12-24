@@ -43,6 +43,37 @@ def process_single_molecule_wrapper(args):
     """Wrapper function for multiprocessing with imap_unordered"""
     return process_single_molecule(*args)
 
+# def _convert_density_for_gpu(density, use_gpu):
+#     """Convert density matrix to CuPy array if using GPU, otherwise return as-is."""
+#     if use_gpu >= 0:
+#         try:
+#             import cupy as cp
+#             # If density is a tensor, convert to numpy first
+#             if hasattr(density, 'cpu'):
+#                 density_np = density.cpu().numpy()
+#             else:
+#                 density_np = density
+#             return cp.asarray(density_np)
+#         except Exception as e:
+#             print(f"Warning: Failed to convert density to CuPy: {e}, using CPU")
+#             return density.cpu().numpy() if hasattr(density, 'cpu') else density
+#     else:
+#         return density
+
+def _ensure_numpy_float64(array):
+    """
+    Convert array to NumPy float64, handling CuPy arrays, PyTorch tensors, etc.
+    This ensures compatibility with PySCF gradient calculations.
+    """
+    # Handle CuPy arrays (from GPU calculations)
+    if hasattr(array, 'get'):
+        array = array.get()
+    # Handle PyTorch tensors
+    elif hasattr(array, 'cpu'):
+        array = array.cpu().numpy()
+    # Convert to NumPy float64
+    return np.asarray(array, dtype=np.float64)
+
 
 def process_single_molecule(pred_file_path, gt_file_path,
     unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1,
@@ -117,8 +148,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
 
         calc_density, calc_res = calc_dm0_from_ham(atoms, calc_overlap, calc_ham, transform=False, return_tensor=(use_gpu >= 0))
-        calc_density_converted = _convert_density_for_gpu(calc_density, use_gpu)
-        calc_energy = calc_mf.energy_tot(calc_density_converted)
+        calc_energy = calc_mf.energy_tot(calc_density)
         calc_data["calc_energy"] = calc_energy
 
         calc_mo_energy = _ensure_numpy_float64(calc_res["orbital_energies"].squeeze())
@@ -180,8 +210,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
             transform=False,
             return_tensor=(use_gpu >= 0)
             )
-        pred_density_converted = _convert_density_for_gpu(pred_density, use_gpu)
-        pred_energy = calc_mf.energy_tot(pred_density_converted)
+        pred_energy = calc_mf.energy_tot(pred_density)
         pred_data["calc_energy"] = pred_energy
 
         gt_density, gt_res = calc_dm0_from_ham(
@@ -191,8 +220,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
             transform=False,
             return_tensor=(use_gpu >= 0)
             )
-        gt_density_converted = _convert_density_for_gpu(gt_density, use_gpu)
-        gt_energy = calc_mf.energy_tot(gt_density_converted)
+        gt_energy = calc_mf.energy_tot(gt_density)
         gt_data["calc_energy"] = gt_energy
         
         pred_mo_energy = _ensure_numpy_float64(pred_res["orbital_energies"].squeeze())
