@@ -39,6 +39,11 @@ def format_time(seconds):
         secs = seconds % 60
         return f"{hours}h {minutes}m {secs:.2f}s"
 
+def process_single_molecule_wrapper(args):
+    """Wrapper function for multiprocessing with imap_unordered"""
+    return process_single_molecule(*args)
+
+
 def process_single_molecule(pred_file_path, gt_file_path,
     unit="ang", xc="pbe", basis="def2svp", debug=False
 ):
@@ -55,7 +60,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
     data_index = gt_data["idx"]
     molecule_start_time = time.time()
-    logger.info(f"[PID:{os.getpid()}] ========== START Molecule {data_index} ==========")
+    # logger.info(f"[PID:{os.getpid()}] ========== START Molecule {data_index} ==========")
 
     atoms = gt_data["atoms"]
     pos = gt_data["pos"] * BOHR2ANG
@@ -69,9 +74,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
     calc_mf.init_guess = "minao"
     calc_mf.small_rho_cutoff = 1e-12
     timing_info['pyscf_init'] = time.time() - init_start
-    logger.debug(f"[PID:{os.getpid()}] Molecule {data_index}: PySCF init in {format_time(timing_info['pyscf_init'])}")
+    # logger.debug(f"[PID:{os.getpid()}] Molecule {data_index}: PySCF init in {format_time(timing_info['pyscf_init'])}")
 
-    DO_NEW_CALC = True
+    DO_NEW_CALC = False
     #try:
     # Check if calculated data exists
     if os.path.exists(calc_path) and not DO_NEW_CALC:
@@ -145,15 +150,18 @@ def process_single_molecule(pred_file_path, gt_file_path,
         pred_forces = pred_data["calc_forces"]
         pred_mo_energy = pred_data["calc_mo_energy"]
         pred_mo_coeff = pred_data["calc_mo_coeff"]
+        pred_hamiltonian = pred_data["pred_hamiltonian"] + remove_init * gt_data["init_ham"].reshape(pred_data["pred_hamiltonian"].shape)
+        pred_ham = matrix_transform_single(pred_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
 
         gt_energy = gt_data["calc_energy"]
         gt_forces = gt_data["calc_forces"]
         gt_mo_energy = gt_data["calc_mo_energy"]
         gt_mo_coeff = gt_data["calc_mo_coeff"]
+        gt_hamiltonian = gt_data["hamiltonian"] + remove_init * gt_data["init_ham"].reshape(gt_data["hamiltonian"].shape)
+        gt_ham = matrix_transform_single(gt_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
+        gt_overlap = gt_data["overlap"].reshape(calc_overlap.shape)
     else:
         gt_overlap = gt_data["overlap"]
-        # print(f'calc_overlap.shape: {calc_overlap.shape}')
-        # print(f'gt_overlap.shape: {gt_overlap.shape}')
         gt_overlap = torch.from_numpy(gt_overlap).reshape(calc_overlap.shape)
         gt_overlap = matrix_transform_single(gt_overlap, atoms, convention="back2pyscf")
 
@@ -193,22 +201,22 @@ def process_single_molecule(pred_file_path, gt_file_path,
         
         pred_mo_occ = calc_mf.get_occ(pred_mo_energy, pred_mo_coeff)
         pred_data["mo_occ"] = pred_mo_occ
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing pred forces...")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing pred forces...")
         force_start = time.time()
         pred_forces = -grad_frame.kernel(mo_energy=pred_mo_energy, mo_coeff=-pred_mo_coeff, mo_occ=pred_mo_occ)
         pred_force_time = time.time() - force_start
         timing_info['pred_forces'] = pred_force_time
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Pred forces completed in {format_time(pred_force_time)}")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Pred forces completed in {format_time(pred_force_time)}")
         pred_data["calc_forces"] = pred_forces
 
         gt_mo_occ = calc_mf.get_occ(gt_mo_energy, gt_mo_coeff)
         gt_data["mo_occ"] = gt_mo_occ
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing gt forces...")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing gt forces...")
         force_start = time.time()
         gt_forces = -grad_frame.kernel(mo_energy=gt_mo_energy, mo_coeff=-gt_mo_coeff, mo_occ=gt_mo_occ)
         gt_force_time = time.time() - force_start
         timing_info['gt_forces'] = gt_force_time
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: GT forces completed in {format_time(gt_force_time)}")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: GT forces completed in {format_time(gt_force_time)}")
         gt_data["calc_forces"] = gt_forces
 
         if not debug:
@@ -225,9 +233,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
     pred_mo_energy_occ = pred_mo_energy[:num_occ]
     gt_mo_energy_occ = gt_mo_energy[:num_occ]
     calc_mo_energy_occ = calc_mo_energy[:num_occ]
-    pred_mo_occ_coeff = pred_res["sliced_orbital_coefficients"]
-    gt_mo_occ_coeff = gt_res["sliced_orbital_coefficients"]
-    calc_mo_occ_coeff = calc_res["sliced_orbital_coefficients"]
+    pred_mo_occ_coeff = torch.tensor(pred_mo_coeff[:, :num_occ])
+    gt_mo_occ_coeff = torch.tensor(gt_mo_coeff[:, :num_occ])
+    calc_mo_occ_coeff = torch.tensor(calc_mo_coeff[:, :num_occ])
 
     result = {
         "data_index": data_index,
@@ -269,7 +277,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "occupied_orbital_energy_mae (pred-calc)": np.abs(pred_mo_energy_occ - calc_mo_energy_occ).mean(),
         "occupied_orbital_energy_mae (gt-calc)": np.abs(gt_mo_energy_occ - calc_mo_energy_occ).mean(),
 
-        "overlap_diff (gt-calc)": np.abs(gt_overlap - calc_overlap).mean(),
+        "overlap_diff (gt-calc)": np.abs(np.asarray(gt_overlap) - np.asarray(calc_overlap)).mean(),
     }
     # unit of pyscf calculation
     # distance in bohr
@@ -372,9 +380,11 @@ if __name__ == "__main__":
     else:
         # Process with multiprocessing
         logger.info(f"Processing molecules with {num_procs} parallel processes...")
+        # Add debug flag to file_pairs for wrapper function
+        file_pairs_with_debug = [(pred, gt, "ang", "pbe", "def2svp", args.debug) for pred, gt in file_pairs]
         with Pool(processes=num_procs) as pool:
             results = list(tqdm(
-                pool.starmap(process_single_molecule, file_pairs),
+                pool.imap_unordered(process_single_molecule_wrapper, file_pairs_with_debug),
                 total=len(file_pairs),
                 desc="Processing molecules",
                 unit="mol"
