@@ -67,7 +67,7 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 data_name: escflow-ethanol
 basis: "def2-svp"
 xc: 'pbe0'
-dataset_path : "/ssd1/qhflow-mlff/dataset/ethanol_shard/processed/lmdbs"
+dataset_path : "/nas/qhflow-mlff/dataset/ethanol_shard/processed/lmdbs"
 
 # data_name: custom
 # basis: "def2-svp"
