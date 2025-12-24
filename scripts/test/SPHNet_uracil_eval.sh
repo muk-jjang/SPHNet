@@ -4,16 +4,14 @@
 ROOT_DIR="/home/sungjun/repos/SPHNet"
 cd "$ROOT_DIR" || exit 1
 
-PYTHON_PATH="/home/chanhui-lee/.conda/envs/sphnet-gpu4pyscf/bin/python"
-
 export HYDRA_FULL_ERROR=1
 
-export OMP_NUM_THREADS=32
-export MKL_NUM_THREADS=32
-export OPENBLAS_NUM_THREADS=32
-export NUMEXPR_NUM_THREADS=32
+export OMP_NUM_THREADS=16   
+export MKL_NUM_THREADS=16
+export OPENBLAS_NUM_THREADS=16
+export NUMEXPR_NUM_THREADS=16
 python md17_evaluation_customv2.py \
 --dir_path=./outputs/uracil_split_25000_500_4500_pbe0/output_dump \
---num_procs=5 \
+--num_procs=32 \
 --size_limit=-1 \
     

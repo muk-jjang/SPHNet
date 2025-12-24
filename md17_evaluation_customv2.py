@@ -77,7 +77,7 @@ def _ensure_numpy_float64(array):
 
 def process_single_molecule(pred_file_path, gt_file_path,
     unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1,
-    DO_NEW_CALC=False
+    do_new_calc=False
 ):
     dir_path = os.path.dirname(pred_file_path)
     calc_path = pred_file_path.replace("pred_", "calc_")
@@ -106,13 +106,12 @@ def process_single_molecule(pred_file_path, gt_file_path,
     calc_mf.init_guess = "minao"
     calc_mf.small_rho_cutoff = 1e-12
     timing_info['pyscf_init'] = time.time() - init_start
-    # logger.debug(f"[PID:{os.getpid()}] Molecule {data_index}: PySCF init in {format_time(timing_info['pyscf_init'])}")
+    logger.debug(f"[PID:{os.getpid()}] Molecule {data_index}: PySCF init in {format_time(timing_info['pyscf_init'])}")
 
-    DO_NEW_CALC = False
     #try:
     # Check if calculated data exists
-    if os.path.exists(calc_path) and not DO_NEW_CALC:
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Loading cached calc data...")
+    if os.path.exists(calc_path) and not do_new_calc:
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Loading cached calc data...")
         calc_data = torch.load(calc_path)
         calc_energy = calc_data["calc_energy"]
         calc_forces = calc_data["calc_forces"]
@@ -124,12 +123,12 @@ def process_single_molecule(pred_file_path, gt_file_path,
     else:
         calc_data = gt_data.copy()  # Use copy to avoid modifying original
         scf_start = time.time()
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Starting SCF calculation...")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Starting SCF calculation...")
         calc_mf.kernel()
         scf_time = time.time() - scf_start
         timing_info['scf'] = scf_time
         calc_data["calc_time"] = scf_time
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: SCF completed in {format_time(scf_time)}")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: SCF completed in {format_time(scf_time)}")
         calc_data["hamiltonian"] = torch.tensor(calc_mf.get_fock(dm=calc_mf.make_rdm1()), dtype=torch.float64)
         calc_data["overlap"] = torch.tensor(calc_mf.get_ovlp(), dtype=torch.float64)
         calc_data["density_matrix"] = torch.tensor(calc_mf.make_rdm1(), dtype=torch.float64)
@@ -137,12 +136,12 @@ def process_single_molecule(pred_file_path, gt_file_path,
         calc_data["xc"] = xc
         calc_data["basis"] = basis
         # calc_data["scf_cycles"] = calc_mf.cycles
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing initial forces...")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing initial forces...")
         force_start = time.time()
         calc_data["forces"] = torch.tensor(-grad_frame.kernel(), dtype=torch.float64)
         init_force_time = time.time() - force_start
         timing_info['initial_forces'] = init_force_time
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Initial forces completed in {format_time(init_force_time)}")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Initial forces completed in {format_time(init_force_time)}")
 
         calc_overlap = calc_data["overlap"].unsqueeze(0) # (gt_overlap - calc_overlap) has float32 precision error (1e^-7)
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
@@ -158,12 +157,12 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
         mo_occ = calc_mf.get_occ(calc_mo_energy, calc_mo_coeff)
         calc_data["mo_occ"] = mo_occ
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing calc forces with MO...")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing calc forces with MO...")
         force_start = time.time()
         calc_forces = -grad_frame.kernel(mo_energy=calc_mo_energy, mo_coeff=calc_mo_coeff, mo_occ=mo_occ)
         calc_force_time = time.time() - force_start
         timing_info['calc_forces'] = calc_force_time
-        logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Calc forces completed in {format_time(calc_force_time)}")
+        # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Calc forces completed in {format_time(calc_force_time)}")
         calc_data["calc_forces"] = calc_forces
 
         # save calc_data
@@ -177,7 +176,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
     else:
         remove_init = gt_data["remove_init"]
 
-    if "calc_forces" in pred_data.keys() and "calc_forces" in gt_data.keys() and not DO_NEW_CALC:
+    if "calc_forces" in pred_data.keys() and "calc_forces" in gt_data.keys() and not do_new_calc:
         pred_energy = pred_data["calc_energy"]
         pred_forces = pred_data["calc_forces"]
         pred_mo_energy = pred_data["calc_mo_energy"]
@@ -353,6 +352,7 @@ if __name__ == "__main__":
     parser.add_argument("--debug", default=False, action="store_true")
     parser.add_argument("--size_limit", type=int, default=1)
     parser.add_argument("--log_level", type=str, default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR"])
+    parser.add_argument("--do_new_calc", default=False, action="store_true")
     args = parser.parse_args()
 
     # Set log level
@@ -399,7 +399,7 @@ if __name__ == "__main__":
         iter_bar = tqdm(file_pairs, desc="Processing molecules", unit="mol")
         for i, (pred_path, gt_path) in enumerate(iter_bar):
             mol_start = time.time()
-            result = process_single_molecule(pred_path, gt_path, debug=args.debug)
+            result = process_single_molecule(pred_path, gt_path, debug=args.debug, do_new_calc=args.do_new_calc)
             results.append(result)
             elapsed = time.time() - processing_start_time
             avg_time = elapsed / (i + 1)
@@ -413,7 +413,7 @@ if __name__ == "__main__":
         # Process with multiprocessing
         logger.info(f"Processing molecules with {num_procs} parallel processes...")
         # Add debug flag to file_pairs for wrapper function
-        file_pairs_with_debug = [(pred, gt, "ang", "pbe", "def2svp", args.debug) for pred, gt in file_pairs]
+        file_pairs_with_debug = [(pred, gt, "ang", "pbe", "def2svp", args.debug, -1, args.do_new_calc) for pred, gt in file_pairs]
         with Pool(processes=num_procs) as pool:
             results = list(tqdm(
                 pool.imap_unordered(process_single_molecule_wrapper, file_pairs_with_debug),
@@ -481,7 +481,7 @@ if __name__ == "__main__":
         logger.info(f"{key}: {value}")
     logger.info("="*80)
 
-    dataset_name = dir_path.split("/")[-2]
+    dataset_name = dir_path.split("/")[-1]
     # Save evaluation results
     output_file = os.path.join("./outputs", f"{dataset_name}_evaluation_results.json")
     
