@@ -8,9 +8,9 @@ export HYDRA_FULL_ERROR=1
 
 python pipelines/train.py --config-name=ethanol.yaml \
 job_id=escflow_ethanol_new \
-ckpt_path=outputs2 \
-log_dir=outputs2 \
+ckpt_path=/nas/seongjun/sphnet/outputs2 \
+log_dir=/nas/seongjun/sphnet/outputs2 \
 save_output_dump=true \
-batch_size=5 \
+batch_size=10 \
 inference_batch_size=32 \
-devices=[0]
+devices=[1]
