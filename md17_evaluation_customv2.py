@@ -45,7 +45,8 @@ def process_single_molecule_wrapper(args):
 
 
 def process_single_molecule(pred_file_path, gt_file_path,
-    unit="ang", xc="pbe", basis="def2svp", debug=False
+    unit="ang", xc="pbe", basis="def2svp", debug=False, use_gpu=-1,
+    DO_NEW_CALC=False
 ):
     dir_path = os.path.dirname(pred_file_path)
     calc_path = pred_file_path.replace("pred_", "calc_")
@@ -114,13 +115,14 @@ def process_single_molecule(pred_file_path, gt_file_path,
 
         calc_overlap = calc_data["overlap"].unsqueeze(0) # (gt_overlap - calc_overlap) has float32 precision error (1e^-7)
         calc_ham = calc_data["hamiltonian"].unsqueeze(0)
-        
-        calc_density, calc_res = calc_dm0_from_ham(atoms, calc_overlap, calc_ham, transform=False)
-        calc_energy = calc_mf.energy_tot(calc_density)
+
+        calc_density, calc_res = calc_dm0_from_ham(atoms, calc_overlap, calc_ham, transform=False, return_tensor=(use_gpu >= 0))
+        calc_density_converted = _convert_density_for_gpu(calc_density, use_gpu)
+        calc_energy = calc_mf.energy_tot(calc_density_converted)
         calc_data["calc_energy"] = calc_energy
 
-        calc_mo_energy = calc_res["orbital_energies"].squeeze().numpy()
-        calc_mo_coeff = calc_res["orbital_coefficients"].squeeze().numpy()
+        calc_mo_energy = _ensure_numpy_float64(calc_res["orbital_energies"].squeeze())
+        calc_mo_coeff = _ensure_numpy_float64(calc_res["orbital_coefficients"].squeeze())
         calc_data["calc_mo_energy"] = calc_mo_energy
         calc_data["calc_mo_coeff"] = calc_mo_coeff
 
@@ -172,34 +174,38 @@ def process_single_molecule(pred_file_path, gt_file_path,
         gt_ham = matrix_transform_single(gt_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
         
         pred_density, pred_res = calc_dm0_from_ham(
-            atoms=atoms, 
-            overlap=gt_overlap, 
-            hamiltonian=pred_ham, 
-            transform=False
+            atoms=atoms,
+            overlap=gt_overlap,
+            hamiltonian=pred_ham,
+            transform=False,
+            return_tensor=(use_gpu >= 0)
             )
-        pred_energy = calc_mf.energy_tot(pred_density)
+        pred_density_converted = _convert_density_for_gpu(pred_density, use_gpu)
+        pred_energy = calc_mf.energy_tot(pred_density_converted)
         pred_data["calc_energy"] = pred_energy
-        
+
         gt_density, gt_res = calc_dm0_from_ham(
-            atoms=atoms, 
-            overlap=gt_overlap, 
-            hamiltonian=gt_ham, 
-            transform=False
+            atoms=atoms,
+            overlap=gt_overlap,
+            hamiltonian=gt_ham,
+            transform=False,
+            return_tensor=(use_gpu >= 0)
             )
-        gt_energy = calc_mf.energy_tot(gt_density)
+        gt_density_converted = _convert_density_for_gpu(gt_density, use_gpu)
+        gt_energy = calc_mf.energy_tot(gt_density_converted)
         gt_data["calc_energy"] = gt_energy
         
-        pred_mo_energy = pred_res["orbital_energies"].squeeze().numpy()
-        pred_mo_coeff = pred_res["orbital_coefficients"].squeeze().numpy()
+        pred_mo_energy = _ensure_numpy_float64(pred_res["orbital_energies"].squeeze())
+        pred_mo_coeff = _ensure_numpy_float64(pred_res["orbital_coefficients"].squeeze())
         pred_data["calc_mo_energy"] = pred_mo_energy
         pred_data["calc_mo_coeff"] = pred_mo_coeff
 
-        gt_mo_energy = gt_res["orbital_energies"].squeeze().numpy()
-        gt_mo_coeff = gt_res["orbital_coefficients"].squeeze().numpy()
+        gt_mo_energy = _ensure_numpy_float64(gt_res["orbital_energies"].squeeze())
+        gt_mo_coeff = _ensure_numpy_float64(gt_res["orbital_coefficients"].squeeze())
         gt_data["calc_mo_energy"] = gt_mo_energy
         gt_data["calc_mo_coeff"] = gt_mo_coeff
-        
-        pred_mo_occ = calc_mf.get_occ(pred_mo_energy, pred_mo_coeff)
+
+        pred_mo_occ = _ensure_numpy_float64(calc_mf.get_occ(pred_mo_energy, pred_mo_coeff))
         pred_data["mo_occ"] = pred_mo_occ
         # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing pred forces...")
         force_start = time.time()
@@ -209,7 +215,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
         # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Pred forces completed in {format_time(pred_force_time)}")
         pred_data["calc_forces"] = pred_forces
 
-        gt_mo_occ = calc_mf.get_occ(gt_mo_energy, gt_mo_coeff)
+        gt_mo_occ = _ensure_numpy_float64(calc_mf.get_occ(gt_mo_energy, gt_mo_coeff))
         gt_data["mo_occ"] = gt_mo_occ
         # logger.info(f"[PID:{os.getpid()}] Molecule {data_index}: Computing gt forces...")
         force_start = time.time()
@@ -345,8 +351,6 @@ if __name__ == "__main__":
     # Create list of (pred_path, gt_path) tuples
     file_pairs = list(zip(list_pred_paths, list_gt_paths))
     
-    if args.debug:
-        args.size_limit = 1
     if args.size_limit > 0:
         file_pairs = file_pairs[:args.size_limit]
 

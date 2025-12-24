@@ -32,18 +32,18 @@ meV_ANG_2_HA_BOHR    = 1.0 / HA_BOHR_2_meV_ANG     # meV/Angstrom to Hartree/Boh
 HA_BOHR_2_HA_ANG     = 1.0 / BOHR2ANG              # Hartree/Bohr to Hartree/Angstrom
 HA_ANG_2_HA_BOHR     = 1.0 / ANG2BOHR              # Hartree/Angstrom to Hartree/Bohr
 
-def init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp"):
+def init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp", use_gpu=-1):
     """
     Initialize PySCF Molecule object.
-    
+
     Args:
         atoms (list): List of atomic numbers
         pos (array): Atomic positions in angstrom
         pos_factor (float): Position scaling factor (default: 1.0)
         xc (str): Exchange-correlation functional (default: "pbe")
         basis (str): Basis set name (default: "def2svp")
-        gpu (bool): Whether to use GPU acceleration (default: False)
-        
+        use_gpu (int): GPU device ID to use. -1 for CPU, >=0 for specific GPU device (default: -1)
+
     Returns:
         pyscf.dft.RKS: PySCF RKS object
     """
@@ -53,29 +53,45 @@ def init_pyscf_mf(atoms, pos, unit="ang", xc="pbe", basis="def2svp"):
         pos_factor = BOHR2ANG
     else:
         raise ValueError(f"Invalid unit: {unit}")
-    return init_pyscf_mf_(atoms, pos, pos_factor=pos_factor, xc=xc, basis=basis)
+    return init_pyscf_mf_(atoms, pos, pos_factor=pos_factor, xc=xc, basis=basis, use_gpu=use_gpu)
 
-def init_pyscf_mf_(atoms, pos, pos_factor=1.0, xc="pbe", basis="def2svp"):
+def init_pyscf_mf_(atoms, pos, pos_factor=1.0, xc="pbe", basis="def2svp", use_gpu=-1):
     """
     Initialize PySCF Molecule object.
-    
+
     Args:
         atoms (list): List of atomic numbers
         pos (array): Atomic positions in angstrom
         pos_factor (float): Position scaling factor (default: 1.0)
         xc (str): Exchange-correlation functional (default: "pbe")
         basis (str): Basis set name (default: "def2svp")
-        gpu (bool): Whether to use GPU acceleration (default: False)
-        
+        use_gpu (int): GPU device ID to use. -1 for CPU, >=0 for specific GPU device (default: -1)
+
     Returns:
-        pyscf.dft.RKS: PySCF RKS object
+        pyscf.dft.RKS: PySCF RKS object (CPU or GPU version)
     """
     mol = init_pyscf_mol_(atoms, pos, pos_factor, basis)
-    mf = dft.RKS(mol)
-    
+
+    if use_gpu >= 0:
+        try:
+            from gpu4pyscf import dft as gpu_dft
+
+            # Note: CUDA_VISIBLE_DEVICES must be set before importing gpu4pyscf
+            # This should be done at the script level, not here
+            mf = gpu_dft.RKS(mol).density_fit()
+            mf.verbose = 0  # Reduce GPU verbosity
+        except ImportError:
+            print(f"Warning: gpu4pyscf not installed, falling back to CPU")
+            mf = dft.RKS(mol)
+        except Exception as e:
+            print(f"Warning: Failed to initialize GPU {use_gpu}: {e}, falling back to CPU")
+            mf = dft.RKS(mol)
+    else:
+        mf = dft.RKS(mol)
+
     mf.xc = xc
     mf.basis = basis
-    
+
     return mf
 
 def init_pyscf_mol_(atoms, pos, pos_factor=1.0, basis="def2svp"):
@@ -98,13 +114,13 @@ def init_pyscf_mol_(atoms, pos, pos_factor=1.0, basis="def2svp"):
     mol.build(verbose=0, atom=mol_conf, basis=basis, unit="ang")
     return mol
 
-def calc_dm0_from_ham(atoms, overlap, hamiltonian, transform=True, convention="back2pyscf", output_res=True):
+def calc_dm0_from_ham(atoms, overlap, hamiltonian, transform=True, convention="back2pyscf", output_res=True, return_tensor=False):
     """
     Calculate density matrix from Hamiltonian.
-    
+
     This function computes the density matrix by solving the eigenvalue problem
     and constructing the density matrix from occupied orbitals.
-    
+
     Args:
         atoms (torch.Tensor): Atomic numbers
         overlap (torch.Tensor): Overlap matrix
@@ -112,9 +128,10 @@ def calc_dm0_from_ham(atoms, overlap, hamiltonian, transform=True, convention="b
         transform (bool): Whether to transform matrices (default: True)
         convention (str): Orbital convention for transformation (default: "back2pyscf")
         output_res (bool): Whether to return additional results (default: True)
-        
+        return_tensor (bool): If True, return torch tensor instead of numpy array (default: False)
+
     Returns:
-        tuple or numpy.ndarray: Density matrix and optionally additional results
+        tuple or numpy.ndarray/torch.Tensor: Density matrix and optionally additional results
     """
     if transform:
         # Ensure tensors have batch dimension
@@ -122,12 +139,12 @@ def calc_dm0_from_ham(atoms, overlap, hamiltonian, transform=True, convention="b
             overlap = overlap.unsqueeze(0)
         if hamiltonian.dim() == 2:
             hamiltonian = hamiltonian.unsqueeze(0)
-            
+
         # Apply matrix transformations
         overlap = matrix_transform_single(overlap, atoms, convention=convention)
         hamiltonian = matrix_transform_single(hamiltonian, atoms, convention=convention)
-    
-    return calc_dm0_from_ham_(atoms, overlap, hamiltonian, output_res=output_res)
+
+    return calc_dm0_from_ham_(atoms, overlap, hamiltonian, output_res=output_res, return_tensor=return_tensor)
 
 def matrix_transform_single(hamiltonian, atoms, convention="pyscf_def2svp", use_optimized=True):
     """Transform matrix between different orbital conventions - CUDA optimized version.
@@ -177,22 +194,23 @@ def matrix_transform_single(hamiltonian, atoms, convention="pyscf_def2svp", use_
     else:
         return _matrix_transform_single(hamiltonian, atoms, conv)
 
-def calc_dm0_from_ham_(atoms, overlap, hamiltonian, output_res=True):
+def calc_dm0_from_ham_(atoms, overlap, hamiltonian, output_res=True, return_tensor=False):
     """
     Calculate density matrix from Hamiltonian.
-    
+
     This function computes the density matrix by solving the eigenvalue problem
     and constructing the density matrix from occupied orbitals.
-    
+
     Args:
         atoms (torch.Tensor): Atomic numbers
         overlap (torch.Tensor): Overlap matrix
         hamiltonian (torch.Tensor): Hamiltonian matrix
         output_res (bool): Whether to return additional results (default: True)
-        
+        return_tensor (bool): If True, return torch tensor instead of numpy array (default: False)
+
     Returns:
-        tuple or numpy.ndarray: Density matrix and optionally additional results
-    """    
+        tuple or numpy.ndarray/torch.Tensor: Density matrix and optionally additional results
+    """
     # Calculate orbital energies and coefficients
     if overlap.dim() == 2:
         overlap = overlap.unsqueeze(0)
@@ -201,15 +219,18 @@ def calc_dm0_from_ham_(atoms, overlap, hamiltonian, output_res=True):
     orbital_energies, orbital_coefficients = cal_orbital_and_energies(
         overlap, hamiltonian
     )
-    
+
     # Number of occupied orbitals (half of total electrons)
-    num_orb = int(atoms.sum() / 2)    
+    num_orb = int(atoms.sum() / 2)
     orbital_coefficients = orbital_coefficients.squeeze()
 
     # Construct density matrix from occupied orbitals
     sliced_orbital_coefficients = orbital_coefficients[:, :num_orb]
-    dm0 = sliced_orbital_coefficients.matmul(sliced_orbital_coefficients.T)* 2
-    dm0 = dm0.cpu().numpy()
+    dm0 = sliced_orbital_coefficients.matmul(sliced_orbital_coefficients.T) * 2
+
+    # Convert to numpy unless return_tensor is True
+    if not return_tensor:
+        dm0 = dm0.cpu().numpy()
 
     if output_res:
         res = {

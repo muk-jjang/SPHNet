@@ -4,9 +4,9 @@ defaults: # which model/schedule config file to use
 - _self_
 
 job_id: malondialdehyde_split_25000_500_1478_pbe0 # The checkpoint/log file is saved in ckpt_path/job_id
-ckpt_path: outputs
+ckpt_path: /nas/seongjun/sphnet/outputs
 seed: 123
-log_dir: "outputs"
+log_dir: /nas/seongjun/sphnet/outputs
 save_output_dump: false
 debug: false
 
@@ -47,6 +47,7 @@ hami_val_loss: 'mae'
 ngpus: 1
 devices: [1]
 num_nodes: 1
+devices: [0,1] # list of devices to use
 precision: 32 # the precison for training, can use 16 for mixed precision
 gradient_clip_val: 5.0
 early_stopping_patience: 300000

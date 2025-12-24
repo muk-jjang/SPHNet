@@ -3,6 +3,9 @@
 # Always run from repo root regardless of call location
 ROOT_DIR="/home/sungjun/repos/SPHNet"
 cd "$ROOT_DIR" || exit 1
+
+PYTHON_PATH="/home/chanhui-lee/.conda/envs/sphnet-gpu4pyscf/bin/python"
+
 export HYDRA_FULL_ERROR=1
 
 export OMP_NUM_THREADS=32
