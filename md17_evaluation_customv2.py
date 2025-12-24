@@ -449,7 +449,6 @@ if __name__ == "__main__":
         logger.info(f"{key}: {value}")
     logger.info("="*80)
 
-    dir_dir_path = os.path.dirname(dir_path)
     dataset_name = dir_path.split("/")[-2]
     # Save evaluation results
     output_file = os.path.join("./outputs", f"{dataset_name}_evaluation_results.json")
