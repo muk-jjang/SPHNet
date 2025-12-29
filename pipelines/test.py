@@ -129,6 +129,8 @@ def main(config):
         default_root_dir=config.log_dir,
         callbacks=callbacks,
         logger=[tb_logger, wandb_logger,csv_logger], 
+        val_check_interval = config.val_check_interval,
+        check_val_every_n_epoch = config.check_val_every_n_epoch,
         precision=config.precision,
         strategy=strategy,
         gradient_clip_val = config.gradient_clip_val,
@@ -141,21 +143,19 @@ def main(config):
     )
 
     # use previous ckpt if have one
-    if hasattr(config, "specific_ckpt_path") and config.specific_ckpt_path is not None:
-        ckpt_path = config.specific_ckpt_path
-    else:
-        ckpt_files = glob.glob(os.path.join(config.log_dir, '*.ckpt'))  
-        print(os.path.join(config.log_dir, '*.ckpt'))
-        # ckpt_files = False
-        if ckpt_files:  
-            ckpt_path = get_latest_ckpt(config.log_dir)
-            print(f"ckpt_path: {ckpt_path}")  
-        else:  
-            raise ValueError("No .ckpt files found in the folder.")
+    ckpt_files = glob.glob(os.path.join(config.log_dir, '*.ckpt'))  
+    print(os.path.join(config.log_dir, '*.ckpt'))
+    # ckpt_files = False
+    if ckpt_files:  
+        latest_file = max(ckpt_files, key=os.path.getctime)  
+        print(f"The latest .ckpt file is: {latest_file}")  
+    else:  
+        raise ValueError("No .ckpt files found in the folder.")
 
     # run test set after completing the fit
-    print(ckpt_path,config.log_dir)
-    trainer.test(model, data,ckpt_path=ckpt_path)
+    latest_file = get_latest_ckpt(config.log_dir)
+    print(latest_file,config.log_dir)
+    trainer.test(model, data,ckpt_path=latest_file)
 
 
 if __name__ == "__main__":
