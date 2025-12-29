@@ -8,5 +8,9 @@ export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=1
 python pipelines/train.py \
 --config-name=malondialdehyde.yaml \
-save_output_dump=true
+job_id=malondialdehyde \
+save_output_dump=true \
+inference_batch_size=216 \
+ckpt_path=/nas/seongjun/sphnet/ \
+log_dir=/nas/seongjun/sphnet/
     

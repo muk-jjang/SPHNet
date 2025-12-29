@@ -8,6 +8,7 @@ export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=5
 python pipelines/test.py \
 --config-name=naphthalene.yaml \
+job_id=naphthalene \
 save_output_dump=true \
 inference_batch_size=216 \
 ckpt_path=/nas/seongjun/sphnet/ \

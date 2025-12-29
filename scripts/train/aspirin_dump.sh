@@ -8,6 +8,7 @@ export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=1
 python pipelines/test.py \
 --config-name=aspirin.yaml \
+job_id=aspirin \
 save_output_dump=true \
 inference_batch_size=216 \
 ckpt_path=/nas/seongjun/sphnet/ \

@@ -8,7 +8,9 @@ export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=1
 python pipelines/test.py \
 --config-name=uracil.yaml \
+job_id=uracil \
 save_output_dump=true \
 inference_batch_size=216 \
-
+ckpt_path=/nas/seongjun/sphnet/ \
+log_dir=/nas/seongjun/sphnet/
     
