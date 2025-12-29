@@ -1,7 +1,6 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+ROOT_DIR="/home/sungjun/repos/SPHNet"
 
 cd "$ROOT_DIR" || exit 1
 export HYDRA_FULL_ERROR=1
