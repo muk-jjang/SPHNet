@@ -796,7 +796,7 @@ class LNNP(LightningModule):
         return error_dict["loss"]
 
     def save_output_dump(self, batch, batch_idx):
-        log_dir = os.path.join(self.hparams.log_dir, "output_dump_batch")
+        log_dir = os.path.join(self.hparams.log_dir, self.hparams.dump_dir)
         os.makedirs(log_dir, exist_ok=True)
         # get rank if distributed training initialized
         if torch.distributed.is_initialized():
@@ -866,11 +866,12 @@ class LNNP(LightningModule):
 
             pred = {
                 "pred_hamiltonian": pred_hamiltonian[mol_idx].cpu(),
+                "pred_ham_diag": batch['pred_hamiltonian_diagonal_blocks'][mol_idx].cpu(),
+                "pred_ham_non_diag": batch['pred_hamiltonian_non_diagonal_blocks'][mol_idx].cpu(),
                 **config,
             }
 
-            #file_index = f"rank{rank}_batch{batch_idx}_mol{mol_idx}"
-            file_index = f"batch{batch_idx}_mol{global_idx}"
+            file_index = f"mol{global_idx}"
             torch.save(pred, os.path.join(log_dir, f"pred_{file_index}.pt"))
             
             gt_init_ham = gt_init_hamiltonian[mol_idx]
@@ -882,6 +883,8 @@ class LNNP(LightningModule):
                 "init_ham": gt_init_ham.cpu(),
                 "energy": gt_dft_energy[mol_idx].cpu(),
                 "force": gt_dft_force[mol_idx].cpu(),
+                "gt_ham_diag": batch['hamiltonian_diagonal_blocks'][mol_idx].cpu(),
+                "gt_ham_non_diag": batch['hamiltonian_non_diagonal_blocks'][mol_idx].cpu(),
                 **config,
             }
             torch.save(gt, os.path.join(log_dir, f"gt_{file_index}.pt")) 
