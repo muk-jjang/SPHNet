@@ -10,7 +10,7 @@ export OPENBLAS_NUM_THREADS=8
 export NUMEXPR_NUM_THREADS=8
 
 python md17_evaluation_customv2.py \
---dir_path=outputs/aspirin_result \
+--dir_path=outputs/aspirin \
 --num_procs=32 \
 --size_limit=-1 \
 --do_new_calc

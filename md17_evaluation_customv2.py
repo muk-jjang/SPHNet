@@ -285,6 +285,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "energy_diff (pred-calc_energy)": abs(pred_energy - calc_energy),
         "energy_diff (gt-calc_energy)": abs(gt_energy - calc_energy),
 
+        "energy_diff_meV (pred-gt)": abs(pred_energy - gt_energy) * HA2meV,
+        "energy_diff_meV (pred-calc_energy)": abs(pred_energy - calc_energy) * HA2meV,
+        "energy_diff_meV (gt-calc_energy)": abs(gt_energy - calc_energy) * HA2meV,
+
         "pred_force": pred_forces,
         "gt_force": gt_forces,
         "calc_force": calc_forces,
@@ -293,6 +297,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "forces_diff l2 (pred-calc_forces)": abs(pred_forces - calc_forces).mean(),
         "forces_diff l2 (gt-calc_forces)": abs(gt_forces - calc_forces).mean(),
 
+        "forces_diff_meV/A (pred-gt)": abs(pred_forces - gt_forces).mean() * HA2meV,
+        "forces_diff_meV/A (pred-calc_forces)": abs(pred_forces - calc_forces).mean() * HA2meV,
+        "forces_diff_meV/A (gt-calc_forces)": abs(gt_forces - calc_forces).mean() * HA2meV,
+
         "pred_force_norm": pred_forces_norm,
         "gt_force_norm": gt_forces_norm,
         "calc_force_norm": calc_forces_norm,
@@ -300,6 +308,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "pred_force_norm_diff (pred-gt)": abs(pred_forces_norm - gt_forces_norm).mean(),
         "pred_force_norm_diff (pred-calc_forces)": abs(pred_forces_norm - calc_forces_norm).mean(),
         "gt_force_norm_diff (gt-calc_forces)": abs(gt_forces_norm - calc_forces_norm).mean(),
+
+        "pred_force_norm_diff_meV/A (pred-gt)": abs(pred_forces_norm - gt_forces_norm).mean() * HA2meV,
+        "pred_force_norm_diff_meV/A (pred-calc_forces)": abs(pred_forces_norm - calc_forces_norm).mean() * HA2meV,
+        "gt_force_norm_diff_meV/A (gt-calc_forces)": abs(gt_forces_norm - calc_forces_norm).mean() * HA2meV,
 
         "orbital_coeff_similarity (pred-gt)": torch.cosine_similarity(pred_mo_occ_coeff, gt_mo_occ_coeff, dim=0).abs().mean(),
         "orbital_coeff_similarity (pred-calc)": torch.cosine_similarity(pred_mo_occ_coeff, calc_mo_occ_coeff, dim=0).abs().mean(),
