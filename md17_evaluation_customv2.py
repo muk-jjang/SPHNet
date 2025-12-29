@@ -108,7 +108,7 @@ def process_single_molecule(pred_file_path, gt_file_path,
     pos = gt_data["pos"] * BOHR2ANG
     calc_mf = init_pyscf_mf(atoms, pos, unit=unit, xc=xc, basis=basis, use_gpu=use_gpu)
     grad_frame = calc_mf.nuc_grad_method()
-    calc_mf.conv_tol = 1e-12
+    calc_mf.conv_tol = 1e-7
     calc_mf.grids.level = 3
     calc_mf.grids.prune = None
     calc_mf.init_guess = "minao"
@@ -178,20 +178,10 @@ def process_single_molecule(pred_file_path, gt_file_path,
         pred_mo_energy = pred_data["calc_mo_energy"]
         pred_mo_coeff = pred_data["calc_mo_coeff"]
 
-        pred_hamiltonian = pred_data["pred_hamiltonian"] + remove_init * gt_data["init_ham"].reshape(pred_data["pred_hamiltonian"].shape)
-        pred_ham = matrix_transform_single(pred_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
-
         gt_energy = gt_data["calc_energy"]
         gt_forces = gt_data["calc_forces"]
         gt_mo_energy = gt_data["calc_mo_energy"]
         gt_mo_coeff = gt_data["calc_mo_coeff"]
-
-        gt_hamiltonian = gt_data["hamiltonian"] + remove_init * gt_data["init_ham"].reshape(gt_data["hamiltonian"].shape)
-        gt_ham = matrix_transform_single(gt_hamiltonian.unsqueeze(0), atoms, convention="back2pyscf")
-
-        gt_overlap = gt_data["overlap"]
-        gt_overlap = torch.from_numpy(gt_overlap).reshape(calc_overlap.shape)
-        gt_overlap = matrix_transform_single(gt_overlap, atoms, convention="back2pyscf")
     else:
         gt_overlap = gt_data["overlap"]
         gt_overlap = torch.from_numpy(gt_overlap).reshape(calc_overlap.shape)
@@ -300,9 +290,9 @@ def process_single_molecule(pred_file_path, gt_file_path,
         "gt_force": gt_forces,
         "calc_force": calc_forces,
 
-        "forces_diff (pred-gt)": abs(pred_forces - gt_forces).mean(),
-        "forces_diff (pred-calc_forces)": abs(pred_forces - calc_forces).mean(),
-        "forces_diff (gt-calc_forces)": abs(gt_forces - calc_forces).mean(),
+        "forces_diff l2 (pred-gt)": abs(pred_forces - gt_forces).mean(),
+        "forces_diff l2 (pred-calc_forces)": abs(pred_forces - calc_forces).mean(),
+        "forces_diff l2 (gt-calc_forces)": abs(gt_forces - calc_forces).mean(),
 
         "pred_force_norm": pred_forces_norm,
         "gt_force_norm": gt_forces_norm,
@@ -363,13 +353,12 @@ Examples:
     parser.add_argument("--gt_prefix", type=str, default="gt_")
     parser.add_argument("--num_procs", type=int, default=1,
                        help="Number of processes. For multi-GPU, must equal number of GPUs")
-    parser.add_argument("--skip_data_save", default=False, action="store_true")
+    parser.add_argument("--save_data", default=True)
     parser.add_argument("--size_limit", type=int, default=-1)
     parser.add_argument("--use_gpu", type=str, default=None,
                        help="GPU config: None/-1 for CPU, single ID (e.g., '0'), or comma-separated for multi-GPU (e.g., '0,1,2,3')")
     parser.add_argument("--do_new_calc", default=False, action="store_true")
     args = parser.parse_args()
-    args.save_data = not args.skip_data_save
 
     # Parse GPU configuration
     if args.use_gpu is None or args.use_gpu == "-1":
