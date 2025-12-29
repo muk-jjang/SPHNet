@@ -36,6 +36,7 @@ class Config(BaseSchema):
     seed: int = 0
     job_id: str = "auto"
     ckpt_path: str = '/data'
+    specific_ckpt_path: Optional[str] = None
     log_dir: str = "./tmp"
     save_output_dump: bool = False
     schedule: Dict[str, Any] = MISSING

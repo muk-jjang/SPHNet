@@ -140,15 +140,19 @@ def main(config):
     )
 
     # use previous ckpt if have one
-    ckpt_files = glob.glob(os.path.join(config.log_dir, '*.ckpt'))  
-    print(os.path.join(config.log_dir, '*.ckpt'))
-    # ckpt_files = False
-    if ckpt_files:  
-        latest_file = max(ckpt_files, key=os.path.getctime)  
-        print(f"The latest .ckpt file is: {latest_file}")  
-    else:  
-        print("No .ckpt files found in the folder.")
-        latest_file = None
+    if hasattr(config, "specific_ckpt_path") and config.specific_ckpt_path is not None:
+        latest_file = config.specific_ckpt_path
+        print(f"Using specific checkpoint: {latest_file}")
+    else:
+        ckpt_files = glob.glob(os.path.join(config.log_dir, '*.ckpt'))
+        print(os.path.join(config.log_dir, '*.ckpt'))
+        # ckpt_files = False
+        if ckpt_files:
+            latest_file = max(ckpt_files, key=os.path.getctime)
+            print(f"The latest .ckpt file is: {latest_file}")
+        else:
+            print("No .ckpt files found in the folder.")
+            latest_file = None
     trainer.fit(model, data, ckpt_path=latest_file)
 
     # run test set after completing the fit
