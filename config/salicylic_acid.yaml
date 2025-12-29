@@ -65,7 +65,7 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 
 data_name: rmd-salicylic_acid
 basis: "def2-svp"
-xc: 'pbe0'
+xc: 'pbe'
 dataset_path : "/nas/qhflow-mlff/dataset/md-salicylic_acid"
 
 # data_name: custom

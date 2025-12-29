@@ -5,6 +5,7 @@ defaults: # which model/schedule config file to use
 
 job_id: aspirin # The checkpoint/log file is saved in ckpt_path/job_id
 ckpt_path: outputs
+specific_ckpt_path: null
 seed: 123
 log_dir: "outputs"
 save_output_dump: false
@@ -65,7 +66,7 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 
 data_name: rmd-aspirin
 basis: "def2-svp"
-xc: 'pbe0'
+xc: 'pbe'
 dataset_path : "/nas/qhflow-mlff/dataset/md-aspirin"
 
 # data_name: custom
