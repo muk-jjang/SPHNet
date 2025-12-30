@@ -834,10 +834,7 @@ class LNNP(LightningModule):
             gt_overlap = batch['s1e']
         else:
             raise AttributeError("Could not find overlap matrix field. Expected one of: overlap, s1e")
-        gt_dft_energy = batch.energy
-        gt_dft_force = batch.forces
-        poses = []
-        atoms = []
+
 
         if "qh9" in self.hparams.data_name:
             format = "pyscf_def2svp"
@@ -846,33 +843,35 @@ class LNNP(LightningModule):
             format = "e3nn"
             length_unit = "bohr"
 
+        batch_full_edge_index = batch.full_edge_index
+
         batch_size = batch.batch.max().item() + 1
         iter_bar = tqdm(range(batch.ptr.shape[0] -1), desc=f"Rank {rank} Saving output dumps")
+        cum_non_diag_width = []
         for mol_idx in iter_bar:
             start = batch.ptr[mol_idx]
             end = batch.ptr[mol_idx + 1]
 
             pos = batch.pos[start:end].cpu()
             atoms = batch.atomic_numbers[start:end].cpu()
-            global_idx = batch.idx[mol_idx].item()
+            global_idx = batch.idx[mol_idx].item()        
             config = {
                 "overlap": gt_overlap[mol_idx],
                 "pos": pos,
                 "atoms": atoms,
                 "format": format,
                 "length_unit":length_unit,
-                "idx": global_idx
+                "idx": global_idx,
             }
+            cur_non_diag_width = atoms.shape[0] * (atoms.shape[0] - 1) // 2
+            prev_non_diag_width = sum(cum_non_diag_width)
 
             pred = {
                 "pred_hamiltonian": pred_hamiltonian[mol_idx].cpu(),
-                "pred_ham_diag": batch['pred_hamiltonian_diagonal_blocks'][mol_idx].cpu(),
-                "pred_ham_non_diag": batch['pred_hamiltonian_non_diagonal_blocks'][mol_idx].cpu(),
+                "pred_ham_diag": batch['pred_hamiltonian_diagonal_blocks'][start:end].cpu(),
+                "pred_ham_non_diag": batch['pred_hamiltonian_non_diagonal_blocks'][prev_non_diag_width:prev_non_diag_width+cur_non_diag_width].cpu(),
                 **config,
             }
-
-            file_index = f"mol{global_idx}"
-            torch.save(pred, os.path.join(log_dir, f"pred_{file_index}.pt"))
             
             gt_init_ham = gt_init_hamiltonian[mol_idx]
             if isinstance(gt_init_ham, np.ndarray):
@@ -881,12 +880,15 @@ class LNNP(LightningModule):
             gt = {
                 "hamiltonian": gt_hamiltonian[mol_idx].cpu(),
                 "init_ham": gt_init_ham.cpu(),
-                "energy": gt_dft_energy[mol_idx].cpu(),
-                "force": gt_dft_force[mol_idx].cpu(),
-                "gt_ham_diag": batch['hamiltonian_diagonal_blocks'][mol_idx].cpu(),
-                "gt_ham_non_diag": batch['hamiltonian_non_diagonal_blocks'][mol_idx].cpu(),
+                "energy": batch.energy[mol_idx].cpu(),
+                "force": batch.forces[start:end].cpu(),
+                "gt_ham_diag": batch['diag_hamiltonian'][start:end].cpu(),
+                "gt_ham_non_diag": batch['non_diag_hamiltonian'][prev_non_diag_width:prev_non_diag_width+cur_non_diag_width].cpu(),
                 **config,
             }
+            cum_non_diag_width.append(cur_non_diag_width)
+            file_index = f"mol{global_idx}"
+            torch.save(pred, os.path.join(log_dir, f"pred_{file_index}.pt"))
             torch.save(gt, os.path.join(log_dir, f"gt_{file_index}.pt")) 
             
         return
