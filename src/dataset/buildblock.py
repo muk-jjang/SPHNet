@@ -274,26 +274,26 @@ def matrixtoblock_lin(H,Z,mask_lin,max_block_size,sym = False):
     if sym:
         unit_matrix = np.ones((n_atom,n_atom))
         # if up and down remove eye
-        upper_triangular_matrix = unit_matrix - np.triu(unit_matrix)
+        down_triangular_matrix = unit_matrix - np.triu(unit_matrix)
         diag = new_H[np.eye(n_atom)==1]
-        non_diag = new_H[upper_triangular_matrix==1]
+        non_diag = new_H[down_triangular_matrix==1]
         
         diag_mask = new_mask[np.eye(n_atom)==1]
-        non_diag_mask = new_mask[upper_triangular_matrix==1]
+        non_diag_mask = new_mask[down_triangular_matrix==1]
         del new_H,new_mask,new_H_tmp,new_mask_tmp
 
         return diag,non_diag,diag_mask,non_diag_mask
     else:
         unit_matrix = np.ones((n_atom,n_atom))
         # if up and down remove eye
-        upper_triangular_matrix = unit_matrix - np.eye(len(Z))
+        non_diagonal_matrix = unit_matrix - np.eye(len(Z))
         # # if up remove eye
         # upper_triangular_matrix = np.triu(unit_matrix) - np.eye(len(Z))
         diag = new_H[np.eye(n_atom)==1]
-        non_diag = new_H[upper_triangular_matrix==1]
+        non_diag = new_H[non_diagonal_matrix==1]
         
         diag_mask = new_mask[np.eye(n_atom)==1]
-        non_diag_mask = new_mask[upper_triangular_matrix==1]
+        non_diag_mask = new_mask[non_diagonal_matrix==1]
         del new_H,new_mask,new_H_tmp,new_mask_tmp
 
         return diag,non_diag,diag_mask,non_diag_mask
