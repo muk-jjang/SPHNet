@@ -44,10 +44,10 @@ class DataModule(LightningDataModule):
         worker_rank = self.trainer.global_rank if is_distributed else 0
 
         if stage == "fit" or stage is None or self.train_dataset is None:
-            if "qh9" in self.data_name.lower() or "md17" == self.data_name or "custom" in self.data_name.lower():
+            if "qh9" in self.data_name.lower() or "md17" in self.data_name.lower() or "custom" in self.data_name.lower() and self.data_name.lower() != 'rmd17':
                     dataset = MdbDataset(path = self.path,remove_init=self.config["remove_init"])
                     print("len dataset ",len(dataset))
-            elif "rmd" in self.data_name.lower():
+            elif "rmd17" in self.data_name.lower():
                 dataset = RMD17_DFT(
                     self.path, 
                     name=self.data_name,
