@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import time
+import glob
 import lmdb
 import pickle
 import numpy as np
@@ -20,6 +21,7 @@ from torch_geometric.data import Data
 from torch_geometric.transforms.radius_graph import RadiusGraph
 from torch_scatter import scatter
 from sklearn.cluster import KMeans,SpectralClustering
+from src.dataset.matrix_transforms import _matrix_transform_single
 import argparse
 
 # Periodic Table of Elements
@@ -244,6 +246,17 @@ convention_dict = {
     ),
 }
 convention_dict["pyscf_def2svp"]   = convention_dict["pyscf_def2svp_to_e3nn"]
+
+def _matrix_transform(matrices: torch.Tensor, atoms: torch.Tensor, convention: str) -> torch.Tensor:
+    return _matrix_transform_single(matrices, atoms, convention_dict[convention])
+
+def _to_tensor(data) -> torch.Tensor:
+    """Utility converting numpy arrays to float64 torch tensors on CPU."""
+    if isinstance(data, torch.Tensor):
+        return data.detach().cpu().double()
+    arr = np.asarray(data)
+    dtype = torch.float64 if arr.dtype.kind == "f" else torch.int64
+    return torch.from_numpy(arr).to(dtype)
 
 def _get_orbital_mask(basis = "def2-svp"):
     """Get orbital masks for different atomic numbers.
@@ -541,36 +554,34 @@ if __name__ == "__main__":
                     # 각 shard는 0부터 시작하는 로컬 인덱스를 사용
                     data = get_data_from_env(global_idx, env_data)
                     atoms_num = data['atoms'].shape[0]
-                    # print('data keys: ', data.keys())
-                    # print('dft_energy: ', data['dft_energy'].shape)
-                    # print('forces: ', data['force'].shape)
-                    # print('orbital_energies: ', data['orbital_energies'].shape)
-                    # print('data overlap: ', data['overlap'].shape)
-                    
-                    data_processed.num_nodes = atoms_num
-                    data_processed.pos = torch.tensor(data['pos'])
-                    neighbor_finder = RadiusGraph(r=3)
-                    data_processed = neighbor_finder(data_processed)
-                    min_nodes_foreachGroup = 4
-                    build_label(data_processed, num_labels=int(atoms_num/min_nodes_foreachGroup), method='kmeans')
+                    #transform to tensor
+                    data['overlap'] = _to_tensor(data['overlap'])
+                    data['hamiltonian'] = _to_tensor(data['hamiltonian'])
+                    data['initial_hamiltonian'] = _to_tensor(data['initial_hamiltonian'])
+                    #pyscf_def2svp_to_e3nn transform
+                    data['overlap'] = _matrix_transform(data['overlap'], data['atoms'], "pyscf_def2svp_to_e3nn")
+                    data['hamiltonian'] = _matrix_transform(data['hamiltonian'], data['atoms'], "pyscf_def2svp_to_e3nn")
+                    data['initial_hamiltonian'] = _matrix_transform(data['initial_hamiltonian'], data['atoms'], "pyscf_def2svp_to_e3nn")
 
-                    data_dict = {
-                        "id": global_idx,
-                        "pos": np.array(data['pos']),
-                        "atoms": data['atoms'],
-                        "edge_index": data_processed['edge_index'],
-                        "labels": data_processed['labels'],
-                        "num_nodes": atoms_num,
-                        "Ham": data['hamiltonian'],
-                        "Ham_init": data['initial_hamiltonian'],
-                        "energy": data['dft_energy'],
-                        "forces": data['dft_forces'],
-                        "overlap": data['overlap'],
-                        "orbital_energies": data['orbital_energies'],
-                    }
+                    #transform to numpy array
+                    data['overlap'] = np.array(data['overlap'])
+                    data['hamiltonian'] = np.array(data['hamiltonian'])
+                    data['initial_hamiltonian'] = np.array(data['initial_hamiltonian'])
+
+                    '''
+                    'num_nodes', 'atoms', 'pos', 'energy', 'force', 'dft_energy', 'dft_forces', 'h_dim', 
+                    'packed_hamiltonian', 'packed_data_hamiltonian', 'packed_overlap', 'packed_initial_hamiltonian', 'orbital_energies', 
+                    'packed_orbital_coefficients', 'packed_dm0', 'hamiltonian', 'overlap', 'initial_hamiltonian']
+                    '''
                     
-                    # 각 엔트리마다 바로 저장
-                    current_length = write_single_to_lmdb(output_env, data_dict, current_length)
+
+                    # data의 모든 키를 유지하면서 변환된 값만 업데이트
+                    # data_dict를 새로 만들지 않고 data 자체를 사용하되, 필요한 필드만 추가/수정
+                    data['id'] = global_idx  # id 추가 (없으면) 
+                    # 이미 변환된 값들은 data에 그대로 있음
+
+                    # 각 엔트리마다 바로 저장 (data 전체를 저장)
+                    current_length = write_single_to_lmdb(output_env, data, current_length)
                     total_processed += 1
                     
                     # 진행 상황 출력 (PROGRESS_INTERVAL개마다)
