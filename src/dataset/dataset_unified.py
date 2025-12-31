@@ -198,14 +198,14 @@ class MdbDataset(Dataset):
                 data_dict['id'], data_dict['num_nodes'], \
                 np.frombuffer(data_dict['atoms'], np.int32), \
                 np.frombuffer(data_dict['pos'], np.float64), \
-                np.frombuffer(data_dict['Ham'], np.float64), \
-                np.frombuffer(data_dict['forces'], np.float64), \
-                np.frombuffer(data_dict['energy'], np.float64), \
+                np.frombuffer(data_dict['hamiltonian'], np.float64), \
+                np.frombuffer(data_dict['dft_forces'], np.float64), \
+                np.frombuffer(data_dict['dft_energy'], np.float64), \
                 np.frombuffer(data_dict['overlap'], np.float64)
-
+            num_nodes = atoms.shape[0]
             pos = pos.reshape(num_nodes, 3)
             num_orbitals = sum([5 if atom <= 2 else 14 for atom in atoms])
-            Ham_init = np.frombuffer(data_dict['Ham_init'], np.float64)
+            Ham_init = np.frombuffer(data_dict['initial_hamiltonian'], np.float64)
             if self.remove_init:
                 Ham = (Ham-Ham_init).reshape(num_orbitals, num_orbitals)
             else:
