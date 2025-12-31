@@ -167,6 +167,7 @@ data/*
 # local files
 outputs/
 outputs2/
+transformed_outputs/
 index/*
 
 index/*
