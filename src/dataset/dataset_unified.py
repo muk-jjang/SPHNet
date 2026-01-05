@@ -225,18 +225,18 @@ class MdbDataset(Dataset):
 
         return {
                 "idx":idx,
-                "pos": pos.astype(np.float32), 
+                "pos": pos.astype(np.float64), 
                 "atomic_numbers": atoms,           
                 'molecule_size':len(pos),
-                "fock": Ham.astype(np.float32),
-                "init_fock": Ham_init.astype(np.float32),
-                "s1e": overlap.astype(np.float32),
+                "fock": Ham.astype(np.float64),
+                "init_fock": Ham_init.astype(np.float64),
+                "s1e": overlap.astype(np.float64),
                 "buildblock_mask":self.mask,
                 "max_block_size":self.conv.max_block_size,
                 "labels":data.labels.numpy(),
                 "edge_index":data.edge_index.numpy(),
-                "forces": forces.astype(np.float32).reshape(-1,3),
-                "energy": energy.astype(np.float32),
+                "forces": forces.astype(np.float64).reshape(-1,3),
+                "energy": energy.astype(np.float64),
                 }
     def connect_db(self, lmdb_path=None):
         env = lmdb.open(
@@ -519,8 +519,8 @@ class LmdbDataset(Dataset):
  
         for transform in self.transforms:
             data_object = transform(data_object)
-        out = {'pos': data_object.pos.numpy().astype(np.float32), 
-            'forces': data_object.forces.numpy().astype(np.float32),
+        out = {'pos': data_object.pos.numpy().astype(np.float64), 
+            'forces': data_object.forces.numpy().astype(np.float64),
             'edge_index': data_object.edge_index.numpy(), 
             'labels': data_object.labels.numpy(),
             'atomic_numbers': data_object.atomic_numbers.numpy(),
@@ -529,13 +529,13 @@ class LmdbDataset(Dataset):
             }
         
         energy = data_object.energy.numpy()
-        out["pyscf_energy"] = copy.deepcopy(energy.astype(np.float32))  # this is pyscf energy ground truth
+        out["pyscf_energy"] = copy.deepcopy(energy.astype(np.float64))  # this is pyscf energy ground truth
         if self.remove_atomref_energy:
             unique,counts = np.unique(out["atomic_numbers"],return_counts=True)
             energy = energy - np.sum(self.atom_reference[unique]*counts)
             energy = energy - self.system_ref
             
-        out["energy"] = energy.astype(np.float32) # this is used from model training, mean/ref is removed.
+        out["energy"] = energy.astype(np.float64) # this is used from model training, mean/ref is removed.
         
         if self.enable_hami:
             if self.remove_init:
@@ -543,12 +543,12 @@ class LmdbDataset(Dataset):
             if self.Htoblock_otf == True:
                 out.update({"buildblock_mask":self.mask,
                             "max_block_size":self.conv.max_block_size,
-                            "fock":data_object.fock.numpy().astype(np.float32)
+                            "fock":data_object.fock.numpy().astype(np.float64)
                             })
             else:
                 diag,non_diag,diag_mask,non_diag_mask = None,None,None,None
                 if (not self.old_blockbuild):
-                    diag,non_diag,diag_mask,non_diag_mask = matrixtoblock_lin(data_object.fock.numpy().astype(np.float32),
+                    diag,non_diag,diag_mask,non_diag_mask = matrixtoblock_lin(data_object.fock.numpy().astype(np.float64),
                                                                             data_object.atomic_numbers.numpy(),
                                                                             self.mask,self.conv.max_block_size)
                 else:
@@ -564,12 +564,12 @@ class LmdbDataset(Dataset):
                         'non_diag_hamiltonian': non_diag,
                         'diag_mask': diag_mask,
                         'non_diag_mask': non_diag_mask})
-            out.update({"init_fock":data_object.init_fock.numpy().astype(np.float32)})
-            out.update({"s1e":data_object.overlap.numpy().astype(np.float32)})
+            out.update({"init_fock":data_object.init_fock.numpy().astype(np.float64)})
+            out.update({"s1e":data_object.overlap.numpy().astype(np.float64)})
             if hasattr(data_object, 'orbital_energies'):
-                out.update({"orbital_energy":data_object.orbital_energies.numpy().astype(np.float32)})
+                out.update({"orbital_energy":data_object.orbital_energies.numpy().astype(np.float64)})
             if hasattr(data_object, 'orbital_coefficients'):
-                out.update({"orbital_coefficients":data_object.orbital_coefficients.numpy().astype(np.float32)})
+                out.update({"orbital_coefficients":data_object.orbital_coefficients.numpy().astype(np.float64)})
 
         return out
     
@@ -966,8 +966,8 @@ class RMD17_DFT(Dataset):
             data_object.orbital_energies = _to_tensor(sample["orbital_energies"][:]).view(1, -1)
             data_object.orbital_coefficients = _to_tensor(sample["orbital_coefficients"][:])
 
-        out = {'pos': data_object.pos.numpy().astype(np.float32), 
-            'forces': data_object.forces.numpy().astype(np.float32),
+        out = {'pos': data_object.pos.numpy().astype(np.float64), 
+            'forces': data_object.forces.numpy().astype(np.float64),
             'edge_index': data_object.edge_index.numpy(), 
             'labels': data_object.labels.numpy(),
             'atomic_numbers': data_object.atomic_numbers.numpy(),
@@ -978,13 +978,13 @@ class RMD17_DFT(Dataset):
             energy = data_object.energy.detach().cpu().numpy()
         else:
             energy = data_object.energy
-        out["pyscf_energy"] = copy.deepcopy(energy.astype(np.float32))  # this is pyscf energy ground truth
+        out["pyscf_energy"] = copy.deepcopy(energy.astype(np.float64))  # this is pyscf energy ground truth
         if self.remove_atomref_energy:
             unique,counts = np.unique(out["atomic_numbers"],return_counts=True)
             energy = energy - np.sum(self.atom_reference[unique]*counts)
             energy = energy - self.system_ref
             
-        out["energy"] = energy.astype(np.float32) # this is used from model training, mean/ref is removed.
+        out["energy"] = energy.astype(np.float64) # this is used from model training, mean/ref is removed.
 
         if self.enable_hami:
             if self.remove_init:
@@ -992,12 +992,12 @@ class RMD17_DFT(Dataset):
             if self.Htoblock_otf == True:
                 out.update({"buildblock_mask":self.mask,
                             "max_block_size":self.conv.max_block_size,
-                            "fock":data_object.fock.numpy().astype(np.float32)
+                            "fock":data_object.fock.numpy().astype(np.float64)
                             })
             else:
                 diag,non_diag,diag_mask,non_diag_mask = None,None,None,None
                 if (not self.old_blockbuild):
-                    diag,non_diag,diag_mask,non_diag_mask = matrixtoblock_lin(data_object.fock.numpy().astype(np.float32),
+                    diag,non_diag,diag_mask,non_diag_mask = matrixtoblock_lin(data_object.fock.numpy().astype(np.float64),
                                                                             data_object.atomic_numbers.numpy(),
                                                                             self.mask,self.conv.max_block_size)
                 else:
@@ -1013,11 +1013,11 @@ class RMD17_DFT(Dataset):
                         'non_diag_hamiltonian': non_diag,
                         'diag_mask': diag_mask,
                         'non_diag_mask': non_diag_mask})
-            out.update({"init_fock":data_object.init_fock.numpy().astype(np.float32)})
-            out.update({"s1e":data_object.overlap.numpy().astype(np.float32)})
+            out.update({"init_fock":data_object.init_fock.numpy().astype(np.float64)})
+            out.update({"s1e":data_object.overlap.numpy().astype(np.float64)})
             if hasattr(data_object, 'orbital_energies'):
-                out.update({"orbital_energy":data_object.orbital_energies.numpy().astype(np.float32)})
+                out.update({"orbital_energy":data_object.orbital_energies.numpy().astype(np.float64)})
             if hasattr(data_object, 'orbital_coefficients'):
-                out.update({"orbital_coefficients":data_object.orbital_coefficients.numpy().astype(np.float32)})
+                out.update({"orbital_coefficients":data_object.orbital_coefficients.numpy().astype(np.float64)})
 
         return out

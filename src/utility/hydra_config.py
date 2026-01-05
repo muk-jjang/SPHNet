@@ -38,6 +38,7 @@ class Config(BaseSchema):
     ckpt_path: str = '/data'
     log_dir: str = "./tmp"
     save_output_dump: bool = False
+    dump_dir: str = "output_dump"
     schedule: Dict[str, Any] = MISSING
     model: Dict[str, Any] = MISSING
     wandb: Dict[str, Any] = MISSING
