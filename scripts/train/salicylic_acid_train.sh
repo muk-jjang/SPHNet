@@ -1,11 +1,11 @@
-#!/bin/bash
-
-SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-
-cd "$ROOT_DIR" || exit 1
-export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=2
+devices=$1
+dataset_name=salicylic_acid
 python pipelines/train.py \
---config-name=salicylic_acid.yaml \
-save_output_dump=true
+--config-name=${dataset_name}.yaml \
+save_output_dump=true \
+job_id=${dataset_name}-36M \
+inference_batch_size=128 \
+ckpt_path=/nas/seongjun/sphnet \
+log_dir=/nas/seongjun/sphnet \
+devices=${devices} \
+model=sphnet-36M
