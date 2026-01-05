@@ -47,7 +47,7 @@ class DataModule(LightningDataModule):
             if "qh9" in self.data_name.lower() or "md17" in self.data_name.lower() or "custom" in self.data_name.lower() and self.data_name.lower() != 'rmd17':
                     dataset = MdbDataset(path = self.path,remove_init=self.config["remove_init"])
                     print("len dataset ",len(dataset))
-            elif "rmd17" in self.data_name.lower():
+            elif "rmd" in self.data_name.lower():
                 dataset = RMD17_DFT(
                     self.path, 
                     name=self.data_name,
