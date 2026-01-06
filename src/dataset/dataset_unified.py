@@ -1,6 +1,8 @@
 import lmdb
 import numpy as np
 import torch
+import logging
+logger = logging.getLogger(__name__)
 
 #!/usr/bin/env python3
 
@@ -32,7 +34,7 @@ from argparse import Namespace
 import pickle
 import threading
 import atexit
-
+import json
 from tqdm import tqdm
 import torch.nn.functional as F
 # from torch_geometric.utils import scatter
@@ -40,7 +42,7 @@ import torch.nn.functional as F
 import sys
 from .build_label import build_label
 from torch_geometric.transforms.radius_graph import RadiusGraph
-from torch_geometric.data import Data
+from torch_geometric.data import Data, InMemoryDataset
 from src.dataset.utils_escflow import AOData, Onsite_3idx_Overlap_Integral, build_molecule, build_AO_index, get_all_conventions
 from src.dataset.matrix_transforms import pack_upper_triangle, unpack_upper_triangle, _matrix_transform_single, get_convention_dict, _cut_matrix_3d, _cut_matrix_3d_last
 
@@ -142,6 +144,7 @@ class MdbDataset(Dataset):
         orbital_mask_line1 = idx_1s_2s_2p
         orbital_mask_line2 = torch.arange(self.full_orbitals)
         self.remove_init = remove_init
+        self.convention_dict = get_convention_dict()
         # for i in range(1, 11):
         #     self.orbital_mask[i] = orbital_mask_line1 if i <= 2 else orbital_mask_line2
 
@@ -174,6 +177,19 @@ class MdbDataset(Dataset):
             # 워커 프로세스 종료 시 LMDB 환경을 닫도록 등록
             atexit.register(self._close_db_env)
         return self._local.env
+   
+    def set_conventions(self):
+        if any(name in self.data_name.lower() for name in ["water", "ethanol", "malondialdehyde", "uracil", "aspirin"]):
+            self.convention_dict = get_convention_dict()
+            self.convention = "pyscf_def2svp_to_e3nn"
+        elif "qh9" in self.data_name.lower():
+            self.convention_dict = get_convention_dict()
+            self.convention = "pyscf_def2svp_to_e3nn"
+        else:
+            raise NotImplementedError
+    
+    def _matrix_transform(self, matrices: torch.Tensor, atoms: torch.Tensor, convention: str) -> torch.Tensor:
+        return _matrix_transform_single(matrices, atoms, self.convention_dict[convention])
     
     def _close_db_env(self):
         """Thread-local storage의 LMDB 환경 닫기"""
@@ -194,14 +210,15 @@ class MdbDataset(Dataset):
         with db_env.begin() as txn:
             data_dict = txn.get(int(idx).to_bytes(length=4, byteorder='big'))
             data_dict = pickle.loads(data_dict)
-            _, num_nodes, atoms, pos, Ham, forces, energy, overlap = \
+            _, num_nodes, atoms, pos, Ham, forces, energy, overlap, h_dim = \
                 data_dict['id'], data_dict['num_nodes'], \
                 np.frombuffer(data_dict['atoms'], np.int32), \
                 np.frombuffer(data_dict['pos'], np.float64), \
                 np.frombuffer(data_dict['hamiltonian'], np.float64), \
                 np.frombuffer(data_dict['dft_forces'], np.float64), \
                 np.frombuffer(data_dict['dft_energy'], np.float64), \
-                np.frombuffer(data_dict['overlap'], np.float64)
+                np.frombuffer(data_dict['overlap'], np.float64), \
+                data_dict['h_dim']
             num_nodes = atoms.shape[0]
             pos = pos.reshape(num_nodes, 3)
             num_orbitals = sum([5 if atom <= 2 else 14 for atom in atoms])
@@ -213,6 +230,9 @@ class MdbDataset(Dataset):
         #     data = self.get_mol(atoms, pos, Ham)
         # db_env.close()
         # return data
+        overlap = np.array(self._matrix_transform(torch.tensor(overlap).reshape(1, num_orbitals, num_orbitals), atoms, "pyscf_def2svp_to_e3nn"))
+        Ham = np.array(self._matrix_transform(torch.tensor(Ham).reshape(1, num_orbitals, num_orbitals), atoms, "pyscf_def2svp_to_e3nn"))
+        Ham_init = np.array(self._matrix_transform(torch.tensor(Ham_init).reshape(1, num_orbitals, num_orbitals), atoms, "pyscf_def2svp_to_e3nn"))        
         data = Data()
         N_atom = atoms.shape[0]
         data.num_nodes = N_atom
@@ -228,9 +248,9 @@ class MdbDataset(Dataset):
                 "pos": pos.astype(np.float32), 
                 "atomic_numbers": atoms,           
                 'molecule_size':len(pos),
-                "fock": Ham.astype(np.float32),
-                "init_fock": Ham_init.astype(np.float32),
-                "s1e": overlap.astype(np.float32),
+                "fock": Ham.astype(np.float32).reshape(1, h_dim, h_dim),
+                "init_fock": Ham_init.astype(np.float32).reshape(1, h_dim, h_dim),
+                "s1e": overlap.astype(np.float32).reshape(1, h_dim, h_dim),
                 "buildblock_mask":self.mask,
                 "max_block_size":self.conv.max_block_size,
                 "labels":data.labels.numpy(),
@@ -399,6 +419,39 @@ class LmdbDataset(Dataset):
             self.convention = "pyscf_def2svp_to_e3nn"
         else:
             raise NotImplementedError
+    
+    def _get(self, idx):
+        """Optimized data loading: Reuse LMDB connection and minimize unnecessary operations."""
+        try:
+            return self._get(idx)
+        except Exception as e:
+            # If there's an error, try to refresh the LMDB environment
+            logger.warning(f"Error accessing LMDB for idx {idx}: {e}. Attempting to refresh environment.")
+            shard_idx = self.shard_idx_list[idx]
+            if shard_idx in self._db_envs:
+                try:
+                    self._db_envs[shard_idx].close()
+                except:
+                    pass
+                del self._db_envs[shard_idx]
+            
+            # Retry with fresh environment
+            return self._get(idx)
+    
+    def _get(self, idx):
+        # Get cached LMDB environment (no need for context manager since we're reusing connections)        
+        db_env = self._get_shard_db_env(idx)
+        with db_env.begin() as txn:
+            key = int(idx).to_bytes(length=4, byteorder="big")
+            data_dict = txn.get(key)
+            
+            if data_dict is None:
+                print(self.get_key_list(idx))
+                raise KeyError(f"Index idx: {idx}, shard_data_idx: {self.shard_data_idx_list[idx]} not found in database {self.shard_idx_list[idx]}")
+                
+            data_dict = pickle.loads(data_dict)
+            data = self.get_mol(data_dict, orb_energy_and_coeff=True)
+        return data
 
     def get_mol(self, data_dict, orb_energy_and_coeff=False):
         num_nodes = torch.tensor(data_dict["num_nodes"], dtype=torch.int64)
@@ -1021,3 +1074,407 @@ class RMD17_DFT(Dataset):
                 out.update({"orbital_coefficients":data_object.orbital_coefficients.numpy().astype(np.float32)})
 
         return out
+
+
+class MD17_DFT_Shard(InMemoryDataset):
+
+    url = "http://quantum-machine.org/data/schnorb_hamiltonian"
+    chemical_symbols = ["n", "H", "He", "Li", "Be", "B", "C", "N", "O"]
+
+    def __init__(
+        self,
+        path="datasets/",
+        data_name="water",
+        transform=None,
+        pre_transform=None,
+        pre_filter=None,
+        prefix="_shard",
+        shard_num=-1,
+        shard_idx=-1,
+        max_workers_preprocess=8,
+        use_parallel_preprocess=False,
+        split="random",
+        use_in_memory=False,
+        all_features=False,
+        enable_hami=True,
+        old_blockbuild=False,
+        Htoblock_otf=True,
+        remove_atomref_energy=False,
+        remove_init=False,
+        functional="pbe",
+        basis="def2svp",
+    ):
+        self.name = data_name
+        root = path
+        self.folder = os.path.join(root, self.name + prefix)
+        self.processd_dir_name = "processed"
+        self.shard_dir_name = "lmdbs"
+        self._processed_path = os.path.join(self.folder, self.processd_dir_name)
+
+        self.enable_hami = enable_hami
+        self.old_blockbuild = old_blockbuild
+        self.Htoblock_otf = Htoblock_otf
+        self.remove_atomref_energy = remove_atomref_energy
+        self.remove_init = remove_init
+        self.conv, self.orbitals_ref, self.mask,self.chemical_symbols = None,None,None,None
+        self.atom_reference, self.system_ref, _,_,_ = get_data_default_config(data_name)
+
+        self.shard_num = shard_num
+        if self.shard_num == -1:
+            if self.name == "water":
+                self.shard_num = 2
+            elif self.name == "ethanol":
+                self.shard_num = 8
+            elif self.name == "malondialdehyde":
+                self.shard_num = 8
+            elif self.name == "uracil":
+                self.shard_num = 16
+
+        self.shard_idx = shard_idx
+        self.max_workers_preprocess = max_workers_preprocess
+        self.use_parallel_preprocess = use_parallel_preprocess
+        self.split = split
+        self.all_features = all_features
+                
+        self.lmdb_path_list = [os.path.join(self._processed_path,self.shard_dir_name, f"shard_{i:03d}.lmdb") for i in range(self.shard_num)]
+        
+        self.full_orbitals = 14
+        self.orbital_mask = {}
+        
+        orbitals_ref = {}
+        orbitals_ref[1] = np.array([0, 0, 1])  # H: 2s 1p
+        orbitals_ref[6] = np.array([0, 0, 0, 1, 1, 2])  # C: 3s 2p 1d
+        orbitals_ref[7] = np.array([0, 0, 0, 1, 1, 2])  # N: 3s 2p 1d
+        orbitals_ref[8] = np.array([0, 0, 0, 1, 1, 2])  # O: 3s 2p 1d
+        self.orbitals_ref = orbitals_ref
+
+        orbitals = []
+        assert self.name in ["water", "ethanol", "malondialdehyde", "uracil", "aspirin", "malonaldehyde"]
+        if self.name == "malonaldehyde":
+            logger.info("Malonaldehyde is renamed to Malondialdehyde for compatibility")
+            self.name = "malondialdehyde"
+        if self.name == "water":
+            self.atoms = [8, 1, 1]
+            self.atom_list = ["O", "H"]
+            self.hamiltonian_size = 24
+        elif self.name == "ethanol":
+            self.atoms = [6, 6, 8, 1, 1, 1, 1, 1, 1]
+            self.atom_list = ["C", "O", "H"]
+            self.hamiltonian_size = 72
+        elif self.name == "malondialdehyde":
+            self.atoms = [6, 6, 6, 8, 8, 1, 1, 1, 1]
+            self.atom_list = ["C", "O", "H"]
+            self.hamiltonian_size = 90
+        elif self.name == "uracil":
+            self.atoms = [6, 6, 7, 6, 7, 6, 8, 8, 1, 1, 1, 1]
+            self.atom_list = ["C", "N", "O", "H"]
+            self.hamiltonian_size = 132
+        elif self.name == "aspirin":
+            self.atoms = [6, 6, 6, 6, 6, 6, 6, 8, 8, 8, 6, 6, 8, 1, 1, 1, 1, 1, 1, 1, 1]
+            self.atom_list = ["C", "O", "H"]
+            raise NotImplementedError
+        
+        self.Q_dict = Onsite_3idx_Overlap_Integral(atom_list=self.atom_list, basis="def2-svp").Q_table()
+        self.convention_dict = get_convention_dict()
+        self.setup_Q()
+  
+        for Z in self.atoms:
+            orbitals.append(tuple((int(Z), int(l)) for l in self.orbitals_ref[Z]))
+        
+        self.orbitals = tuple(orbitals)
+
+        self._db_envs = {}  # Cache for LMDB environments by shard index
+        self.shard_idx_list = [] # Mapping from data index to shard index
+
+        self.functional = functional
+        self.basis = basis
+        if self.enable_hami:
+            if (not self.old_blockbuild):
+                self.conv, _, self.mask,_ = get_conv_variable_lin(basis)
+            else:
+                self.conv, self.orbitals_ref, self.mask,self.chemical_symbols = get_conv_variable(basis)
+
+        super(MD17_DFT_Shard, self).__init__(self.folder, transform, pre_transform, pre_filter)
+        
+        self._load_index_info()
+        
+        self.use_in_memory = use_in_memory
+        # Faster loading in memory but need more memory
+        if self.use_in_memory:
+            data_list = []
+            for idx in range(len(self.shard_idx_list)):
+                data_list.append(self._get(idx))
+            self.data, self.slices = self.collate(data_list)
+            del data_list
+        else:
+        # Used when memory is not enough
+            self.slices = { 
+                "id": torch.arange(len(self.shard_idx_list) + 1)
+            }
+            self.get = self._get
+
+            
+    def _load_index_info(self):
+        with open(os.path.join(self._processed_path, "index.json"), "r") as f:
+            self.index_info = json.load(f)
+        self.index_info = self.index_info["index"]
+        self.shard_idx_list = []
+        self.shard_data_idx_list = []
+        for idx, index_info in enumerate(self.index_info):
+            shard_idx, cur_idx, shard_data_idx = index_info
+            assert cur_idx == idx, f"Shard index {cur_idx} is not equal to the index {idx}"
+            self.shard_idx_list.append(shard_idx)
+            self.shard_data_idx_list.append(shard_data_idx)
+        self.shard_idx_list = torch.tensor(self.shard_idx_list, dtype=torch.int64)
+        max_shard_idx = torch.max(self.shard_idx_list)
+        assert max_shard_idx == self.shard_num - 1, f"Max shard index {max_shard_idx} is not equal to the number of shards {self.shard_num}"
+
+
+    def matrix_transform(self, hamiltonian, atoms, convention="pyscf_def2svp_to_e3nn"):
+        return _matrix_transform_single(hamiltonian, atoms, self.convention_dict[convention])
+
+
+    @staticmethod
+    def construct_orbital_l_index(AO_lm_index):
+        idx = 0
+        AO_l_index = []
+        while True:
+            if idx >= len(AO_lm_index):
+                break
+            AO_l_index.append(AO_lm_index[idx].item())
+            idx += 2 * AO_lm_index[idx] + 1
+        return torch.tensor(AO_l_index)
+    
+    def setup_Q(self):
+        Q_blocks = []
+        for l in range(60):
+            block_diag_components = [self.Q_dict[z][l] for z in self.atoms]
+            Q_blocks.append(torch.block_diag(*block_diag_components))
+        Q = torch.stack(Q_blocks)  # [60, h_dim, h_dim]
+        Q = self.matrix_transform(Q, torch.tensor(self.atoms), convention="pyscf_def2svp_to_e3nn").permute(1, 2, 0) #[h_dim, h_dim, 60]
+        Q[:, :, 16:40] = (
+            Q[:, :, 16:40]
+            .reshape(self.hamiltonian_size, self.hamiltonian_size, -1, 3)[:, :, :, [1, 2, 0]]
+            .reshape(self.hamiltonian_size, self.hamiltonian_size, 24)
+        )
+        self.Q = Q
+    
+    def _get_shard_db_env(self, idx):
+        """Get LMDB environment with caching for performance optimization."""
+        shard_idx = self.shard_idx_list[idx]
+        
+        # Return cached environment if available
+        if shard_idx in self._db_envs:
+            try:
+                # Test if the environment is still valid
+                with self._db_envs[shard_idx].begin() as txn:
+                    txn.stat()  # This will raise an exception if the env is invalid
+                return self._db_envs[shard_idx]
+            except Exception:
+                # Environment is invalid, remove it from cache
+                try:
+                    self._db_envs[shard_idx].close()
+                except:
+                    pass
+                del self._db_envs[shard_idx]
+        
+        # Create new environment and cache it
+        db_env = lmdb.open(
+            self.lmdb_path_list[shard_idx], 
+            readonly=True, 
+            lock=False,
+            max_readers=1024,  # Increase max readers
+            readahead=False    # Disable readahead for better concurrent access
+        )
+        self._db_envs[shard_idx] = db_env
+        return db_env
+        
+        
+    def _close_db_envs(self):
+        """Safely close all cached LMDB environments."""
+        for shard_idx, db_env in list(self._db_envs.items()):
+            try:
+                db_env.close()
+            except Exception as e:
+                logger.warning(f"Error closing LMDB environment for shard {shard_idx}: {e}")
+        self._db_envs.clear()
+    
+    def __del__(self):
+        """Destructor: Clean up all LMDB environments."""
+        self._close_db_envs()
+    
+    def __enter__(self):
+        """Context manager entry: Initialize LMDB environments."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit: Clean up all LMDB environments."""
+        self._close_db_envs()
+        
+    @staticmethod
+    def unpack_upper_triangle(packed: np.ndarray, h_dim: int):
+        return unpack_upper_triangle(packed, h_dim)
+    
+    
+    # def __getitem__(self, idx):
+    #     return self.get(idx)
+    
+    def _get(self, idx):
+        """Optimized data loading: Reuse LMDB connection and minimize unnecessary operations."""
+        try:
+            return self._get(idx)
+        except Exception as e:
+            # If there's an error, try to refresh the LMDB environment
+            logger.warning(f"Error accessing LMDB for idx {idx}: {e}. Attempting to refresh environment.")
+            shard_idx = self.shard_idx_list[idx]
+            if shard_idx in self._db_envs:
+                try:
+                    self._db_envs[shard_idx].close()
+                except:
+                    pass
+                del self._db_envs[shard_idx]
+            
+            # Retry with fresh environment
+            return self._get(idx)
+    
+    def _get(self, idx):
+        # Get cached LMDB environment (no need for context manager since we're reusing connections)        
+        db_env = self._get_shard_db_env(idx)
+        with db_env.begin() as txn:
+            key = int(idx).to_bytes(length=4, byteorder="big")
+            data_dict = txn.get(key)
+            
+            if data_dict is None:
+                print(self.get_key_list(idx))
+                raise KeyError(f"Index idx: {idx}, shard_data_idx: {self.shard_data_idx_list[idx]} not found in database {self.shard_idx_list[idx]}")
+                
+            data_dict = pickle.loads(data_dict)
+            data = self.get_mol(data_dict, orb_energy_and_coeff=True)
+        N_atom = data.pos.shape[0]
+        neighbor_finder = RadiusGraph(r=3)
+        data = neighbor_finder(data)
+        min_nodes_foreachGroup = 4
+        build_label(data, num_labels=int(N_atom/min_nodes_foreachGroup), method='kmeans')
+
+        out = {'pos': data.pos.numpy().astype(np.float32), 
+            'forces': data.force.numpy().astype(np.float32),
+            'edge_index': data.edge_index.numpy(), 
+            'labels': data.labels.numpy(),
+            'atomic_numbers': data.atomic_numbers.numpy(),
+            'molecule_size':data.pos.shape[0],
+            "idx":idx
+            }
+        
+        energy = data.energy.numpy()
+        out["pyscf_energy"] = copy.deepcopy(energy.astype(np.float32))  # this is pyscf energy ground truth
+        if self.remove_atomref_energy:
+            unique,counts = np.unique(out["atomic_numbers"],return_counts=True)
+            energy = energy - np.sum(self.atom_reference[unique]*counts)
+            energy = energy - self.system_ref
+            
+        out["energy"] = energy.astype(np.float32) # this is used from model training, mean/ref is removed.
+        
+        if self.enable_hami:
+            if self.remove_init:
+                data.fock = data.fock - data.init_fock
+            if self.Htoblock_otf == True:
+                out.update({"buildblock_mask":self.mask,
+                            "max_block_size":self.conv.max_block_size,
+                            "fock":data.fock.numpy().astype(np.float32)
+                            })
+            else:
+                diag,non_diag,diag_mask,non_diag_mask = None,None,None,None
+                if (not self.old_blockbuild):
+                    diag,non_diag,diag_mask,non_diag_mask = matrixtoblock_lin(data.fock.numpy().astype(np.float32),
+                                                                            data.atomic_numbers.numpy(),
+                                                                            self.mask,self.conv.max_block_size)
+                else:
+                    H = data.fock
+                    initH = data.init_fock
+                    Z = data.atomic_numbers
+
+                    diag, non_diag, diag_init, non_diag_init, diag_mask, non_diag_mask = split2blocks(
+                        matrix_transform(H,Z,self.conv).numpy(),
+                        matrix_transform(initH,Z,self.conv).numpy(),
+                        Z.numpy(), self.orbitals_ref, self.mask, self.conv.max_block_size)
+                out.update({'diag_hamiltonian': diag,
+                        'non_diag_hamiltonian': non_diag,
+                        'diag_mask': diag_mask,
+                        'non_diag_mask': non_diag_mask})
+            out.update({"init_fock":data.init_fock.numpy().astype(np.float32)})
+            out.update({"s1e":data.overlap.numpy().astype(np.float32)})
+            if hasattr(data, 'orbital_energies'):
+                out.update({"orbital_energy":np.array(data.orbital_energies).astype(np.float32)})
+            if hasattr(data, 'orbital_coefficients'):
+                out.update({"orbital_coefficients":np.array(data.orbital_coefficients).astype(np.float32)})
+        return out
+    
+    def get_mol(self, data_dict, orb_energy_and_coeff=False):
+        num_nodes = torch.tensor(data_dict["num_nodes"], dtype=torch.int64)
+        atoms = torch.tensor(np.frombuffer(data_dict["atoms"], np.int32), dtype=torch.int64)
+        pos = torch.tensor(np.frombuffer(data_dict["pos"], np.float64).reshape(-1, 3), dtype=torch.float64)
+        energy = torch.tensor(data_dict["energy"], dtype=torch.float64)
+        force = torch.tensor(np.frombuffer(data_dict["force"], np.float32).reshape(-1, 3), dtype=torch.float64) # unit: meV/Angstrom
+        dft_energy = torch.tensor(data_dict["dft_energy"], dtype=torch.float64)
+        dft_forces = torch.tensor(np.frombuffer(data_dict["dft_forces"], np.float64).reshape(-1, 3), dtype=torch.float64) # unit: Eh/Bohr
+        h_dim = data_dict["h_dim"] # sum of orbital dimensions
+        packed_hamiltonian = np.frombuffer(data_dict["packed_hamiltonian"], np.float64)
+        packed_data_hamiltonian = np.frombuffer(data_dict["packed_data_hamiltonian"], np.float64)
+        packed_ovlp = np.frombuffer(data_dict["packed_overlap"], np.float64)
+        orbital_energies = np.frombuffer(data_dict["orbital_energies"], np.float64)
+        packed_init_ham = np.frombuffer(data_dict["packed_initial_hamiltonian"], np.float64)
+        packed_orbital_coeff = np.frombuffer(data_dict["packed_orbital_coefficients"], np.float64)
+        # packed_dm0 = np.frombuffer(data_dict["packed_dm0"], np.float64)
+        
+        hamiltonian = torch.from_numpy(self.unpack_upper_triangle(packed_hamiltonian, h_dim)).to(torch.float64)
+        data_hamiltonian = torch.from_numpy(self.unpack_upper_triangle(packed_data_hamiltonian, h_dim)).to(torch.float64)
+        overlap_matrix = torch.from_numpy(self.unpack_upper_triangle(packed_ovlp, h_dim)).to(torch.float64)
+        initial_hamiltonian = torch.from_numpy(self.unpack_upper_triangle(packed_init_ham, h_dim)).to(torch.float64)
+        orbital_coefficients = torch.from_numpy(self.unpack_upper_triangle(packed_orbital_coeff, h_dim)).to(torch.float64)
+        # dm0 = torch.from_numpy(self.unpack_upper_triangle(packed_dm0, h_dim)).to(torch.float64)
+        
+        convention = "pyscf_def2svp_to_e3nn"
+        
+        hamiltonian = self.matrix_transform(hamiltonian, atoms, convention=convention)
+        overlap_matrix = self.matrix_transform(overlap_matrix, atoms, convention=convention)
+        initial_hamiltonian = self.matrix_transform(initial_hamiltonian, atoms, convention=convention)
+        
+        AO_index = build_AO_index(build_molecule(atoms, pos), "def2-svp")
+        AO_l_index = self.construct_orbital_l_index(AO_index[1])
+        
+        edge_index = []
+        for i in range(len(atoms)):
+            for j in range(len(atoms)):
+                if i != j:
+                    edge_index.append([i, j])
+        edge_index = torch.tensor(edge_index, dtype=torch.int64).t().contiguous()
+        full_edge_index = edge_index
+        
+        ret_data = AOData(
+            pos=pos,
+            atomic_numbers=atoms.view(-1, 1),
+            dft_energy=dft_energy.view(1, 1),
+            dft_forces=dft_forces,
+            energy=dft_energy.view(1, 1),
+            force=dft_forces,
+            fock=hamiltonian.reshape(1, h_dim, h_dim),
+            init_fock=initial_hamiltonian.reshape(1, h_dim, h_dim),
+            overlap=overlap_matrix.reshape(1, h_dim, h_dim),
+            orbital_energies=orbital_energies.reshape(1, h_dim),
+            orbital_coefficients=orbital_coefficients.reshape(1, h_dim, h_dim),
+            # AO_index=AO_index,
+            # AO_l_index=AO_l_index,
+            # AO_l_index_len=torch.tensor(len(AO_l_index), dtype=torch.int64).view(1, 1),
+            # num_atoms=num_nodes.view(1, 1),
+            # Q=self.Q,
+            # h_dim=torch.tensor(h_dim, dtype=torch.int64).view(1, 1),
+            # full_edge_index=full_edge_index,
+        )
+
+        # For GPU memory efficiency, we only use the necessary features
+        if self.all_features:
+            ret_data.energy = energy.view(1, 1)
+            ret_data.force = force
+            data_hamiltonian = self.matrix_transform(data_hamiltonian, atoms, convention="orca_to_e3nn")
+            ret_data.data_hamiltonian = data_hamiltonian.reshape(1, h_dim, h_dim)
+        return ret_data
