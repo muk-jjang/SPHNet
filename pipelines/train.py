@@ -15,7 +15,10 @@ import torch
 import wandb
 import os
 # os.environ["WANDB_MODE"] = "offline"
-# print(f"Current PYTHONPATH: {os.environ.get('PYTHONPATH')}")  
+# print(f"Current PYTHONPATH: {os.environ.get('PYTHONPATH')}")
+
+# Load wandb API key from environment variable
+WANDB_API_KEY = os.environ.get('WANDB_API_KEY_KU_AI4SIM', None)
 
 from datetime import datetime
 import random
@@ -110,7 +113,9 @@ def main(config):
     @rank_zero_only
     def log_code():
         if config.wandb.open:
-            wandb.login(key=config.wandb.wandb_api_key, relogin=True)
+            # Use environment variable if available, otherwise fall back to config
+            api_key = WANDB_API_KEY if WANDB_API_KEY else config.wandb.wandb_api_key
+            wandb.login(key=api_key, relogin=True)
             wandb_logger.experiment # runs wandb.init, so then code can be logged next
             wandb.run.log_code(".", include_fn=lambda path: path.endswith(".py") or path.endswith(".yaml"))
     log_code()
