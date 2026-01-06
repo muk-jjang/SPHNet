@@ -8,4 +8,5 @@ inference_batch_size=128 \
 ckpt_path=/nas/seongjun/sphnet \
 log_dir=/nas/seongjun/sphnet \
 devices=${devices} \
-model=sphnet-36M
+model=sphnet-36M \
+wandb.wandb_api_key=${WANDB_API_KEY_KU_AI4SIM}

@@ -13,7 +13,7 @@ debug: false
 
 wandb: # wandb configuration
   open: True
-  wandb_api_key: 5289f0f8d525c80f997b8e51a8f805d35bf3f602
+  wandb_api_key: 
   wandb_project: SPHNet
   wandb_group: ""
   wandb_notes: ""
@@ -41,7 +41,7 @@ lr: 5e-4
 multi_para_group: false
 weight_decay: 0
 enable_hami: true
-enable_energy_hami_error: true # whether to calculate the occupiedenergy MAE and C similarity during validation. This is very slow.
+enable_energy_hami_error: false # whether to calculate the occupiedenergy MAE and C similarity during validation. This is very slow.
 enable_hami_orbital_energy: false # set it to true for WALoss
 hami_train_loss: 'maemse'
 hami_val_loss: 'mae'
@@ -75,7 +75,7 @@ dataset_path : "/ssd1/qhflow-mlff/dataset/malondialdehyde_shard/processed/lmdbs"
 # dataset_path : "example_data/data.mdb"
 index_path : "."
 
-dataset_size : 26978 #the dataset size is used. This will decide the steps of different phases"
+dataset_size : -1 #the dataset size is used. This will decide the steps of different phases"
 train_ratio: 25000
 val_ratio: 500
 test_ratio: 1478
