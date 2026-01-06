@@ -10,7 +10,7 @@ from torch_scatter import scatter
 
 from .utils import make_splits
 
-from ..dataset.dataset_unified import LmdbDataset,get_data_default_config,MdbDataset, RMD17_DFT
+from ..dataset.dataset_unified import LmdbDataset,get_data_default_config,MdbDataset, RMD17_DFT, MD17_DFT_Shard
 from ..dataset.utils import shard_discretizations,InMemoryDataset
 from ..dataset.utils import collate_fn_unified
 from omegaconf import MISSING, DictConfig
@@ -44,10 +44,8 @@ class DataModule(LightningDataModule):
         worker_rank = self.trainer.global_rank if is_distributed else 0
 
         if stage == "fit" or stage is None or self.train_dataset is None:
-            if "qh9" in self.data_name.lower() or "md17" in self.data_name.lower() or "custom" in self.data_name.lower() and self.data_name.lower() != 'rmd17':
-                    dataset = MdbDataset(path = self.path,remove_init=self.config["remove_init"])
-                    print("len dataset ",len(dataset))
-            elif "rmd17" in self.data_name.lower():
+            # Check for rmd17 first (before md17 check, since rmd17 contains "md17")
+            if "rmd" in self.data_name.lower():
                 dataset = RMD17_DFT(
                     self.path, 
                     name=self.data_name,
@@ -61,14 +59,19 @@ class DataModule(LightningDataModule):
                     remove_atomref_energy = self.config["remove_atomref_energy"],
                     remove_init=self.config["remove_init"],
                 )
+                print(f'activate RMD17 dataset')
+            elif "qh9" in self.data_name.lower() or ("md17" in self.data_name.lower() and 'rmd17' not in self.data_name.lower()) or ("custom" in self.data_name.lower() and 'rmd17' not in self.data_name.lower() and 'lmdb' not in self.data_name.lower()):
+                dataset = MdbDataset(path = self.path,remove_init=self.config["remove_init"])
+                print(f'activate MDB dataset')
             else:
-                dataset = LmdbDataset(self.path,
+                dataset = MD17_DFT_Shard(path=self.path,
                                       data_name=self.data_name,
                                         enable_hami = self.config["enable_hami"],
                                         old_blockbuild = False,
                                         basis = self.basis,
                                         remove_atomref_energy = self.config["remove_atomref_energy"],
                                         remove_init=self.config["remove_init"])
+                print(f'activate LMDB dataset')
 
             if "qh9" in self.data_name.lower() and "stable_iid" in self.data_name.lower():
                 print("qh9 stable iid split")
