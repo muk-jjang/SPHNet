@@ -66,7 +66,7 @@ save_interval: 1 #Save interval, one save per n epochs (default: 10)
 data_name: md17
 basis: "def2-svp"
 dataset_path :
-transform_pyscf2e3nn: true
+
 
 # data_name: custom
 # basis: "def2-svp"

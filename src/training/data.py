@@ -60,7 +60,6 @@ class DataModule(LightningDataModule):
                     basis = self.basis,
                     remove_atomref_energy = self.config["remove_atomref_energy"],
                     remove_init=self.config["remove_init"],
-                    transform_pyscf2e3nn=self.config["transform_pyscf2e3nn"],
                 )
             else:
                 dataset = LmdbDataset(self.path,
@@ -70,7 +69,6 @@ class DataModule(LightningDataModule):
                                         basis = self.basis,
                                         remove_atomref_energy = self.config["remove_atomref_energy"],
                                         remove_init=self.config["remove_init"],
-                                        transform_pyscf2e3nn=self.config["transform_pyscf2e3nn"],
                                         )
 
             if "qh9" in self.data_name.lower() and "stable_iid" in self.data_name.lower():
