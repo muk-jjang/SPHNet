@@ -213,8 +213,16 @@ CONVENTION_DICT = {
             # thus max_block_size is 37
             str2idx = {"s":0,"p":0+3*1,"d":0+3*1+2*3},
             max_block_size= 14,
-            orbital_idx_map={'s': np.array([0]), 'p': np.array([2, 0, 1]), 
+            orbital_idx_map={'s': np.array([0]), 'p': np.array([1, 2, 0]), 
                              'd':np.array( [0, 1, 2, 3, 4])},
+            orbital_sign_map={'s': np.array([1]), 'p': np.array([1, 1, 1]), 
+                             'd':np.array( [1, 1, 1, 1, 1])},
+            orbital_order_map={
+                1: [0, 1, 2], 
+                6: [0, 1, 2, 3, 4, 5], 
+                7: [0, 1, 2, 3, 4, 5], 
+                8: [0, 1, 2, 3, 4, 5], 
+                9: [0, 1, 2, 3, 4, 5]},
         ),
         
     }
@@ -223,19 +231,27 @@ def get_conv_variable_lin(basis = "def2-tzvp"):
     # str2order = {"s":0,"p":1,"d":2,"f":3}
     conv = CONVENTION_DICT[basis]
     mask = {}
-    for atom in conv.atom_to_orbitals_map:
-        mask[atom] = []
-        orb_id = 0
-        visited_orbital = set()
-        for s in conv.atom_to_orbitals_map[atom]:
-            if s not in visited_orbital:
-                visited_orbital.add(s)
-                orb_id = conv.str2idx[s]
+    # for atom in conv.atom_to_orbitals_map:
+    #     mask[atom] = []
+    #     orb_id = 0
+    #     visited_orbital = set()
+    #     for s in conv.atom_to_orbitals_map[atom]:
+    #         if s not in visited_orbital:
+    #             visited_orbital.add(s)
+    #             orb_id = conv.str2idx[s]
 
-            mask[atom].extend(conv.orbital_idx_map[s]+orb_id)
-            orb_id += len(conv.orbital_idx_map[s])
-    for key in mask:
-        mask[key] = np.array(mask[key])
+    #         mask[atom].extend(conv.orbital_idx_map[s]+orb_id)
+    #         orb_id += len(conv.orbital_idx_map[s])
+    # for key in mask:
+    #     mask[key] = np.array(mask[key])
+    MAX_ORBITAL_LENGTH = 14
+    MAX_ATOMIC_NUMBER = 9
+    DEFAULT_ORBITAL_INDICES = np.arange(MAX_ORBITAL_LENGTH)
+    mask[1] = np.array([0, 1, 3, 4, 5]) # ssp
+    mask[6] = DEFAULT_ORBITAL_INDICES
+    mask[7] = DEFAULT_ORBITAL_INDICES
+    mask[8] = DEFAULT_ORBITAL_INDICES
+    mask[9] = DEFAULT_ORBITAL_INDICES
     return conv, None, mask,None
 
 def matrixtoblock_lin(H,Z,mask_lin,max_block_size,sym = False):
