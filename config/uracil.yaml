@@ -69,6 +69,7 @@ data_name: escflow-uracil
 basis: "def2-svp"
 xc: 'pbe'
 dataset_path : "/ssd1/qhflow-mlff/dataset/uracil_shard/processed/lmdbs"
+transform_pyscf2e3nn: true
 
 # data_name: custom
 # basis: "def2-svp"

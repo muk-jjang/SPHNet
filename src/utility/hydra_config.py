@@ -111,3 +111,4 @@ class Config(BaseSchema):
     test_homo_lumo_hami: bool = False
     num_sanity_val_steps: int = 0
     check_val_every_n_epoch: int = 1
+    transform_pyscf2e3nn: bool = True  # Transform PySCF orbital ordering to e3nn ordering

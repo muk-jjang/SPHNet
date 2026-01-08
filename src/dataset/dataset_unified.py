@@ -272,7 +272,9 @@ class LmdbDataset(Dataset):
                  remove_init = False,
                  remove_atomref_energy = False,
                  Htoblock_otf = True, ## on save H matrix, H to block is process in collate unifined for memory saving.
-                 basis = "def2svp"):
+                 basis = "def2svp",
+                 transform_pyscf2e3nn = True
+                 ):
         super(LmdbDataset, self).__init__()
         self.path = path
         self.data_name = data_name
@@ -312,6 +314,7 @@ class LmdbDataset(Dataset):
                 self.conv, self.orbitals_ref, self.mask,self.chemical_symbols = get_conv_variable(basis)
 
         self.set_attr_escflow_datset()
+        self.transform_pyscf2e3nn = transform_pyscf2e3nn
 
     def set_attr_escflow_datset(self):
         #self.set_atoms()
@@ -419,10 +422,12 @@ class LmdbDataset(Dataset):
         initial_hamiltonian = torch.from_numpy(self.unpack_upper_triangle(packed_init_ham, h_dim)).to(torch.float64)
         orbital_coefficients = torch.from_numpy(self.unpack_upper_triangle(packed_orbital_coeff, h_dim)).to(torch.float64)
 
-        
-        hamiltonian = self.matrix_transform(hamiltonian, atoms)
-        overlap_matrix = self.matrix_transform(overlap_matrix, atoms)
-        initial_hamiltonian = self.matrix_transform(initial_hamiltonian, atoms)
+        if self.transform_pyscf2e3nn:
+            hamiltonian = self.matrix_transform(hamiltonian, atoms)
+            overlap_matrix = self.matrix_transform(overlap_matrix, atoms)
+            initial_hamiltonian = self.matrix_transform(initial_hamiltonian, atoms)
+        else:
+            pass
         
         AO_index = build_AO_index(build_molecule(atoms, pos), "def2-svp")
         AO_l_index = self.construct_orbital_l_index(AO_index[1])
@@ -772,6 +777,7 @@ class RMD17_DFT(Dataset):
         remove_atomref_energy: bool = True,
         remove_init: bool = True,
         Htoblock_otf: bool = True,
+        transform_pyscf2e3nn = True,
     ) -> None:
         super().__init__()
 
@@ -785,7 +791,6 @@ class RMD17_DFT(Dataset):
         self.enable_hami = enable_hami
         self.remove_atomref_energy = remove_atomref_energy
         self.remove_init = remove_init
-        self.Htoblock_otf = Htoblock_otf
         self.atom_reference, self.system_ref, _,_,_ = get_data_default_config(self.name.replace("rmd-", ""))
 
         self.conv, self.orbitals_ref, self.mask,self.chemical_symbols = None,None,None,None
@@ -846,6 +851,7 @@ class RMD17_DFT(Dataset):
 
         self._prepare_structure_constants()
         self._cache: Dict[int, AOData] = {}
+        self.transform_pyscf2e3nn = transform_pyscf2e3nn
 
     # ------------------------------------------------------------------ utils
     def _prepare_structure_constants(self) -> None:
@@ -923,9 +929,12 @@ class RMD17_DFT(Dataset):
         hamiltonian = _to_tensor(sample["hamiltonian"][:]).reshape(self.h_dim, self.h_dim)
         init_ham = _to_tensor(sample["initial_hamiltonian"][:]).reshape(self.h_dim, self.h_dim)
 
-        overlap = self._matrix_transform(overlap, atoms, "pyscf_def2svp_to_e3nn")
-        hamiltonian = self._matrix_transform(hamiltonian, atoms, "pyscf_def2svp_to_e3nn")
-        init_ham = self._matrix_transform(init_ham, atoms, "pyscf_def2svp_to_e3nn")
+        if self.transform_pyscf2e3nn:
+            overlap = self._matrix_transform(overlap, atoms, "pyscf_def2svp_to_e3nn")
+            hamiltonian = self._matrix_transform(hamiltonian, atoms, "pyscf_def2svp_to_e3nn")
+            init_ham = self._matrix_transform(init_ham, atoms, "pyscf_def2svp_to_e3nn")
+        else:
+            pass
 
         mol_spec = build_molecule(self.atomic_numbers, pos.detach().cpu().numpy())
         #AO_index = build_AO_index(mol_spec, self.basis)

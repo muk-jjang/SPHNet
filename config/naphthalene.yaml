@@ -69,6 +69,7 @@ data_name: rmd-naphthalene
 basis: "def2-svp"
 xc: 'pbe'
 dataset_path : "/nas/qhflow-mlff/dataset/md-naphthalene"
+transform_pyscf2e3nn: true
 
 # data_name: custom
 # basis: "def2-svp"

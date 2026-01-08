@@ -1,5 +1,5 @@
 devices=$1
-dataset_name=uracil
+dataset_name=naphthalene
 python pipelines/train.py \
 --config-name=${dataset_name}.yaml \
 save_output_dump=true \
