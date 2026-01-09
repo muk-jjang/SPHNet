@@ -33,10 +33,10 @@ hami_model:
 use_sparse_tp: true # whether use the sparse tensor product gate
 sparsity: 0.3 #Sparsity ratio
 num_epochs: 3000000 #Maximum number of epochs
-max_steps: 100000 #Maximum number of training steps.
-batch_size: 32
+max_steps: 200000 #Maximum number of training steps.
+batch_size: 5
 inference_batch_size: 1
-dataloader_num_workers: 8
+dataloader_num_workers: 4
 lr: 5e-4
 multi_para_group: false
 weight_decay: 0
@@ -69,7 +69,7 @@ data_name: rmd-aspirin
 basis: "def2-svp"
 xc: 'pbe'
 dataset_path : "/nas/qhflow-mlff/dataset/md-aspirin"
-transform_pyscf2e3nn: true
+
 
 # data_name: custom
 # basis: "def2-svp"
