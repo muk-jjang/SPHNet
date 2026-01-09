@@ -16,7 +16,8 @@ import warnings
 from .sparse_tp.expansion_fx import ExpansionFX as Expansion
 from .sparse_tp.sparse_tp import Sparse_TensorProduct
 
-from .utils import construct_o3irrps_base, construct_o3irrps, get_full_graph, get_conv_variable, block2matrix, get_transpose_index
+from .utils import construct_o3irrps_base, construct_o3irrps, get_full_graph, get_transpose_index
+from ..dataset.buildblock import get_conv_variable_lin, block2matrix
 
 from .lsrm.lsrm_modules import Visnorm_shared_LSRMNorm2_2branchSerial
 
@@ -832,7 +833,7 @@ class Pair_construction_layer(nn.Module):
         else:
             raise ValueError('invalid base')
         
-        self.conv,_,self.mask_lin,_ = get_conv_variable(pyscf_basis_name)
+        self.conv,_,self.mask_lin,_ = get_conv_variable_lin(pyscf_basis_name)
         self.order = order
         self.radial_basis_functions = None
         self.sh_irrep = o3.Irreps.spherical_harmonics(lmax=self.order)
