@@ -8,7 +8,7 @@ ckpt_path: /nas/seongjun/sphnet/outputs
 seed: 123
 log_dir: /nas/seongjun/sphnet/outputs
 save_output_dump: false
-dump_dir: "output_dump"
+dump_dir: "fixed_dump"
 debug: false
 
 wandb: # wandb configuration
