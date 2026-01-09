@@ -1,12 +1,12 @@
 devices=$1
-dataset_name=naphthalene
-python pipelines/train.py \
+dataset_name=$2
+python pipelines/test.py \
 --config-name=${dataset_name}.yaml \
 save_output_dump=true \
-job_id=${dataset_name}-36M \
+job_id=${dataset_name}-36M-qhflow-h \
 inference_batch_size=128 \
-ckpt_path=/nas/seongjun/sphnet \
-log_dir=/nas/seongjun/sphnet \
+ckpt_path=/nas/qhflow-mlff/sphnet \
+log_dir=/nas/qhflow-mlff/sphnet \
 devices=${devices} \
 model=sphnet-36M \
 wandb.wandb_api_key=${WANDB_API_KEY_KU_AI4SIM}
