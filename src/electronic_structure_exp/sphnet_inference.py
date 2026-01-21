@@ -427,7 +427,7 @@ class SPHNetInference:
             dict: Electronic properties (HOMO, LUMO, energy, forces, etc.)
         """
         atoms = pred_result['atoms']
-        positions = pred_result['positions']
+        positions = pred_result['positions'] 
         pred_ham = pred_result['pred_hamiltonian']
         
         # Initialize PySCF - exactly matching sphnet_md17_eval_multiproc.py init_pyscf_optimized
@@ -616,6 +616,20 @@ def main():
         metadata = load_metadata_file(data_path)
         data_dir = os.path.dirname(data_path)
         
+        # Extract metadata info for filename generation
+        molecule_name = metadata.get('molecule_name', 'unknown')
+        site_type = metadata.get('site_type', 'unknown')
+        atom1_idx = metadata.get('atom1_idx', 0)
+        atom2_idx = metadata.get('atom2_idx', 0)
+        atom_types = metadata.get('atom_types', ['X', 'X'])
+        bond_str = f"{atom_types[0]}{atom1_idx}-{atom_types[1]}{atom2_idx}"
+        
+        # Create subfolder based on molecule_name and site_type: e.g., aspirin_primary
+        subfolder_name = f"{molecule_name}_{site_type}"
+        save_subdir = os.path.join(args.save_dir, subfolder_name)
+        os.makedirs(save_subdir, exist_ok=True)
+        logger.info(f"Output directory: {save_subdir}")
+        
         results = []
         for result_file in metadata.get('result_files', []):
             result_path = os.path.join(data_dir, result_file)
@@ -641,7 +655,47 @@ def main():
                 pred_result.update(props)
             
             # Store reference values from DFT
-            pred_result['stretch_ratio'] = result_data.get('stretch_ratio')
+            stretch_ratio = result_data.get('stretch_ratio')
+            
+            # Build output dictionary matching DFT result format
+            output_data = {
+                # Basic structure info
+                'positions': pred_result['positions'],
+                'atoms': pred_result['atoms'],  # For compatibility with plot scripts
+                'atomic_numbers': pred_result['atoms'],
+                'basis': sphnet.basis,
+                'xc': sphnet.xc,
+                'unit (distance)': 'angstrom',
+                'unit (energy)': 'eV',
+                # Electronic properties (SPHNet predictions)
+                'homo_energy_ev': pred_result.get('homo_energy_ev'),
+                'lumo_energy_ev': pred_result.get('lumo_energy_ev'),
+                'energy_ev': pred_result.get('total_energy_ev'),
+                'energy_ref_ev': result_data.get('energy_ref_ev', None),
+                'energy_ha': pred_result.get('total_energy_hartree'),
+                'orbital_energies_ev': pred_result.get('orbital_energies_ev'),
+                'forces_ev_ang': pred_result.get('forces_ev_ang'),
+                'forces_ha_bohr': pred_result.get('forces_hartree_bohr'),
+                'forces_ref_ev': result_data.get('forces_ref_ev', None),
+                'forces_l1_sum': np.abs(pred_result.get('forces_ev_ang', np.zeros((1,3)))).sum() if pred_result.get('forces_ev_ang') is not None else None,
+                'orbital_coefficients': pred_result.get('orbital_coefficients'),
+                'n_occ': pred_result.get('n_occ'),
+                # Matrices
+                'overlap': pred_result.get('overlap'),
+                'hamiltonian_hartree': pred_result.get('pred_hamiltonian_hartree'),
+                'initial_hamiltonian': pred_result.get('init_fock'),
+                'density_matrix': pred_result.get('density_matrix'),
+                # Metadata
+                'stretch_ratio': stretch_ratio,
+                'molecule_name': molecule_name,
+                'atom_types': atom_types,
+                'site_type': site_type,
+                'atom1_idx': atom1_idx,
+                'atom2_idx': atom2_idx,
+            }
+            
+            # Also keep reference values for comparison
+            pred_result['stretch_ratio'] = stretch_ratio
             pred_result['ref_energy_ev'] = result_data.get('energy_ref_ev', None)
             pred_result['ref_homo_ev'] = result_data.get('homo_energy_ev', None)
             pred_result['ref_lumo_ev'] = result_data.get('lumo_energy_ev', None)
@@ -653,19 +707,53 @@ def main():
             else:
                 pred_result['ref_forces_ev_ang'] = None
             
+            # Reference orbital energies (occupied)
+            ref_occ_energies = result_data.get('orbital_energies_occ_ev', None)
+            if ref_occ_energies is not None:
+                if isinstance(ref_occ_energies, torch.Tensor):
+                    ref_occ_energies = ref_occ_energies.numpy()
+                pred_result['ref_orbital_energies_occ_ev'] = np.array(ref_occ_energies)
+            else:
+                pred_result['ref_orbital_energies_occ_ev'] = None
+            
+            # Save individual result file: {molecule}_{site_type}_{bond}_ratio-{ratio}_sphnet.pt
+            individual_filename = f"{molecule_name}_{site_type}_{bond_str}_ratio-{stretch_ratio:.2f}_sphnet.pt"
+            individual_save_path = os.path.join(save_subdir, individual_filename)
+            torch.save(output_data, individual_save_path)
+            logger.info(f"  Saved: {subfolder_name}/{individual_filename}")
+            
             results.append(pred_result)
         
-        # Save all results
-        data_path = os.path.basename(data_path)
-        data_stem, _ = os.path.splitext(data_path)
-        if data_stem.endswith("_metadata"):
-            data_stem = data_stem[:-len("_metadata")]
-        save_path = os.path.join(args.save_dir, f"{data_stem}_sphnet_inference_results.pt")
-        torch.save({
-            'metadata': metadata,
-            'predictions': results
-        }, save_path)
-        logger.info(f"Results saved to: {save_path}")
+        # Save metadata file with all results: {molecule}_{site_type}_{bond}_sphnet_metadata.pt
+        metadata_filename = f"{molecule_name}_{site_type}_{bond_str}_sphnet_metadata.pt"
+        metadata_save_path = os.path.join(save_subdir, metadata_filename)
+        
+        # Build metadata file similar to DFT format
+        result_files = [f"{molecule_name}_{site_type}_{bond_str}_ratio-{r['stretch_ratio']:.2f}_sphnet.pt" for r in results]
+        list_stretch_ratio = [r['stretch_ratio'] for r in results]
+        list_stretched_positions = [r['positions'] for r in results]
+        
+        metadata_output = {
+            # Original metadata info
+            'molecule_name': molecule_name,
+            'site_type': site_type,
+            'atom_types': atom_types,
+            'atom1_idx': atom1_idx,
+            'atom2_idx': atom2_idx,
+            # Both keys for compatibility (exp_bond-stretch_plot_three_methods.py uses 'atoms')
+            'atoms': results[0]['atoms'] if results else None,
+            'atomic_numbers': results[0]['atoms'] if results else None,
+            'positions': metadata.get('positions'),  # Original positions
+            'basis': sphnet.basis,
+            'xc': sphnet.xc,
+            # Stretch info
+            'list_stretch_ratio': list_stretch_ratio,
+            'list_stretched_positions': list_stretched_positions,
+            'result_files': result_files,
+        }
+        
+        torch.save(metadata_output, metadata_save_path)
+        logger.info(f"Metadata saved to: {metadata_save_path}")
         
         # Print summary statistics
         if args.compute_properties and len(results) > 0:
@@ -733,6 +821,13 @@ def main():
                     delta_lumo = pred_lumo - ref_lumo if ref_lumo else 0
                     lumo_errors.append(abs(delta_lumo))
                     
+                    # Occupied orbital energies MAE
+                    pred_occ = r.get('orbital_energies_occ_ev')
+                    ref_occ = r.get('ref_orbital_energies_occ_ev')
+                    if pred_occ is not None and ref_occ is not None:
+                        occ_mae = np.mean(np.abs(pred_occ - ref_occ))
+                        orbital_energies_errors.append(occ_mae)
+                    
                     logger.info(f"{ratio:>8.3f} | {pred_e:>12.4f} | {ref_e:>12.4f} | {delta_e:>+10.4f} | "
                                f"{pred_f:>10.4f} | {ref_f:>10.4f} | {delta_f:>+8.4f} | "
                                f"{delta_homo:>+8.4f} | {delta_lumo:>+8.4f}")
@@ -745,7 +840,10 @@ def main():
                 logger.info(f"  HOMO MAE:      {np.mean(homo_errors):.6f} eV")
                 logger.info(f"  LUMO MAE:      {np.mean(lumo_errors):.6f} eV")
                 logger.info(f"  Gap MAE:       {np.mean([abs(h-l) for h, l in zip(homo_errors, lumo_errors)]):.6f} eV")
-                logger.info(f"  Orbital Energies MAE: {np.mean(orbital_energies_errors):.6f} eV")
+                if orbital_energies_errors:
+                    logger.info(f"  Occ. Orbital Energies MAE: {np.mean(orbital_energies_errors):.6f} eV")
+                else:
+                    logger.info(f"  Occ. Orbital Energies MAE: N/A (no reference data)")
             else:
                 # Print per-ratio details without reference
                 logger.info("-" * 80)
