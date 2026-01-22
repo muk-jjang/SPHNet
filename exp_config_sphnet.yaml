@@ -1,0 +1,46 @@
+# SPHNet Bond Stretch Experiment Configuration
+# This file contains SPHNet model checkpoint paths for each molecule
+
+# SPHNet Model checkpoint configurations (per-molecule)
+# Each molecule requires its own trained checkpoint
+sphnet_checkpoints:
+  # MD17 molecules
+  ethanol:
+    ckpt_path: "/path/to/sphnet/checkpoints/ethanol/last.ckpt"
+    model_length_unit: "ang"  # SPHNet typically uses angstrom
+
+  malondialdehyde:
+    ckpt_path: "/path/to/sphnet/checkpoints/malondialdehyde/last.ckpt"
+    model_length_unit: "ang"
+
+  uracil:
+    ckpt_path: "/path/to/sphnet/checkpoints/uracil/last.ckpt"
+    model_length_unit: "ang"
+
+  # RMD17 molecules
+  salicylic_acid:
+    ckpt_path: "/path/to/sphnet/checkpoints/salicylic_acid/last.ckpt"
+    model_length_unit: "ang"
+
+  naphthalene:
+    ckpt_path: "/path/to/sphnet/checkpoints/naphthalene/last.ckpt"
+    model_length_unit: "ang"
+
+  aspirin:
+    ckpt_path: "/path/to/sphnet/checkpoints/aspirin/last.ckpt"
+    model_length_unit: "ang"
+
+# Default settings (used if not specified per-molecule)
+default_settings:
+  model_length_unit: "ang"
+  device: "cuda"
+
+# Instructions:
+# 1. Update each ckpt_path with the actual path to your SPHNet model checkpoint
+# 2. Each molecule should have its own trained model checkpoint
+# 3. Paths can be absolute or relative to this config file
+# 4. If a checkpoint doesn't exist, that molecule will be skipped
+
+# Example paths:
+# - Absolute: /home/user/models/sphnet/ethanol/checkpoint.ckpt
+# - Relative: ./checkpoints/ethanol/last.ckpt
