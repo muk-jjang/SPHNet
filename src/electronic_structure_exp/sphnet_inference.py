@@ -394,8 +394,8 @@ class SPHNetInference:
         # Build full Hamiltonian from blocks
         pred_hamiltonians = self.model.model.hami_model.build_final_matrix_general(
             output,
-            output['pred_hamiltonian_diagonal_blocks'],
-            output['pred_hamiltonian_non_diagonal_blocks']
+            full_diag = output['pred_hamiltonian_diagonal_blocks'],
+            full_non_diag = output['pred_hamiltonian_non_diagonal_blocks']
         )
         
         result = {
@@ -427,7 +427,7 @@ class SPHNetInference:
             dict: Electronic properties (HOMO, LUMO, energy, forces, etc.)
         """
         atoms = pred_result['atoms']
-        positions = pred_result['positions'] 
+        positions = pred_result['positions']
         pred_ham = pred_result['pred_hamiltonian']
         
         # Initialize PySCF - exactly matching sphnet_md17_eval_multiproc.py init_pyscf_optimized
@@ -441,11 +441,11 @@ class SPHNetInference:
         # CPU gradient calculation (same as init_pyscf_optimized)
         grad_frame = grad_rks.Gradients(calc_mf)
         
-        calc_overlap = torch.tensor(pred_result['overlap'], dtype=torch.float64)
+        calc_overlap = torch.tensor(mol.intor("int1e_ovlp"), dtype=torch.float64)
         
         # Calculate number of occupied orbitals
-        n_electrons = int(atoms.sum())
-        n_occ = n_electrons // 2
+        
+        n_occ = int(atoms.sum() / 2)
         
         # Transform Hamiltonian to PySCF convention
         pred_ham_tensor = torch.tensor(pred_ham, dtype=torch.float64)
@@ -470,14 +470,14 @@ class SPHNetInference:
         )
         
         # Sort orbital energies for HOMO-LUMO calculation
-        # e_idx = np.argsort(mo_energy)
-        # e_sort = mo_energy[e_idx]
+        e_idx = np.argsort(mo_energy)
+        e_sort = mo_energy[e_idx]
         
-        homo_energy_ev = mo_energy[n_occ - 1] * HA2eV
-        lumo_energy_ev = mo_energy[n_occ] * HA2eV
+        homo_energy_ev = e_sort[n_occ - 1] * HA2eV
+        lumo_energy_ev = e_sort[n_occ] * HA2eV
         
         # Extract occupied orbital info
-        mo_energy_occ_ev = mo_energy[:n_occ] * HA2eV
+        mo_energy_occ_ev = e_sort[:n_occ] * HA2eV
         mo_coeff_occ = mo_coeff[:, :n_occ]
         
         result = {
@@ -577,6 +577,10 @@ def main():
         "--compute-properties", action="store_true",
         help="Compute electronic properties (HOMO, LUMO, energy, forces)"
     )
+    parser.add_argument(
+        "--filter-ratio", type=float, default=None,
+        help="Filter to process only results with this stretch ratio (for debugging). Example: --filter-ratio 1.0"
+    )
     
     args = parser.parse_args()
     
@@ -630,6 +634,12 @@ def main():
         os.makedirs(save_subdir, exist_ok=True)
         logger.info(f"Output directory: {save_subdir}")
         
+        # Log filter status if filtering is enabled
+        if args.filter_ratio is not None:
+            logger.info("=" * 80)
+            logger.info(f"DEBUG MODE: Filtering for ratio = {args.filter_ratio:.2f}")
+            logger.info("=" * 80)
+        
         results = []
         for result_file in metadata.get('result_files', []):
             result_path = os.path.join(data_dir, result_file)
@@ -640,6 +650,18 @@ def main():
             
             # Load result data
             result_data = load_result_file(result_path)
+            
+            # Filter by ratio if --filter-ratio is specified (for debugging)
+            stretch_ratio = result_data.get('stretch_ratio')
+            if args.filter_ratio is not None:
+                if stretch_ratio is None:
+                    logger.warning(f"  Skipping {result_file}: no stretch_ratio found")
+                    continue
+                # Allow small floating point tolerance
+                if abs(stretch_ratio - args.filter_ratio) > 1e-6:
+                    logger.info(f"  Skipping ratio {stretch_ratio:.2f} (filtering for {args.filter_ratio:.2f})")
+                    continue
+                logger.info(f"  Processing ratio {stretch_ratio:.2f} (filtered)")
             
             # Convert to standard format for inference
             data = sphnet.load_pt_data(result_path)
